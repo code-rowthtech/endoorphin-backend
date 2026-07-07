@@ -19,9 +19,6 @@ jobs:
           script: |
             set -e
 
-            echo "Fixing permissions..."
-            sudo chown -R ${{ secrets.VM_USER }}:${{ secrets.VM_USER }} /var/www/endorphin-backend
-
             echo "Pulling latest code..."
             git config --global --add safe.directory /var/www/endorphin-backend
             cd /var/www/endorphin-backend
