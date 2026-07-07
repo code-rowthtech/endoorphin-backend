@@ -1,0 +1,6 @@
+.env
+node_modules/
+package-lock.json
+Endoorphin.postman_collection.json
+Endoorphin.postman_environment.json
+uploads/
