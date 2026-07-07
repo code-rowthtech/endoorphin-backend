@@ -1,0 +1,49 @@
+name: CI/CD — Endorphin Backend
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to VM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH into VM and deploy
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            set -e
+
+            echo "Fixing permissions..."
+            sudo chown -R ${{ secrets.VM_USER }}:${{ secrets.VM_USER }} /var/www/endorphin-backend
+
+            echo "Pulling latest code..."
+            git config --global --add safe.directory /var/www/endorphin-backend
+            cd /var/www/endorphin-backend
+            git pull origin main
+
+            echo "Rebuilding Docker image..."
+            docker compose build api
+
+            echo "Restarting container..."
+            docker compose up -d api
+
+            echo "Pruning unused images..."
+            docker image prune -f
+
+            echo "Waiting for container to be healthy..."
+            sleep 10
+
+            echo "Health check..."
+            if docker ps --filter "name=endorphin-api" --filter "status=running" | grep -q endorphin-api; then
+              echo "Container is running. Deploy successful!"
+            else
+              echo "Container is NOT running. Deploy failed!"
+              docker logs endorphin-api --tail=50
+              exit 1
+            fi

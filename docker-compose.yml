@@ -1,0 +1,39 @@
+version: '3.9'
+
+services:
+  api:
+    build: .
+    container_name: endorphin-api
+    ports:
+      - '7706:7706'
+    environment:
+      - PORT=7706
+      - NODE_ENV=${NODE_ENV:-production}
+      - MONGO_URI=mongodb://mongo:27017/endoorphin
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
+      - OTP_EXPIRY_MINUTES=${OTP_EXPIRY_MINUTES:-5}
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    container_name: endorphin-mongo
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  uploads_data:
