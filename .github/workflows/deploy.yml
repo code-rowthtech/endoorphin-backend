@@ -1,4 +1,4 @@
-name: CI/CD — Endorphin Backend
+name: CI/CD — Endoorphin Backend
 
 on:
   push:
@@ -20,8 +20,8 @@ jobs:
             set -e
 
             echo "Pulling latest code..."
-            git config --global --add safe.directory /var/www/endorphin-backend
-            cd /var/www/endorphin-backend
+            git config --global --add safe.directory /var/www/endoorphin-backend
+            cd /var/www/endoorphin-backend
             git pull origin main
 
             echo "Rebuilding Docker image..."
@@ -37,10 +37,10 @@ jobs:
             sleep 10
 
             echo "Health check..."
-            if docker ps --filter "name=endorphin-api" --filter "status=running" | grep -q endorphin-api; then
+            if docker ps --filter "name=endoorphin-api" --filter "status=running" | grep -q endoorphin-api; then
               echo "Container is running. Deploy successful!"
             else
               echo "Container is NOT running. Deploy failed!"
-              docker logs endorphin-api --tail=50
+              docker logs endoorphin-api --tail=50
               exit 1
             fi

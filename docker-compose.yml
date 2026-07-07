@@ -3,7 +3,7 @@ version: '3.9'
 services:
   api:
     build: .
-    container_name: endorphin-api
+    container_name: endoorphin-api
     ports:
       - '7706:7706'
     environment:
@@ -22,7 +22,7 @@ services:
 
   mongo:
     image: mongo:7
-    container_name: endorphin-mongo
+    container_name: endoorphin-mongo
     ports:
       - '27017:27017'
     volumes:
