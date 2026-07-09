@@ -1,15 +1,15 @@
-const mongoose = require('mongoose');
 const TrainerProfile = require('../models/TrainerProfile');
 const { sendSuccess, sendError } = require('../utils/apiResponse');
 const asyncWrapper = require('../utils/asyncWrapper');
 const { getFileUrl } = require('../middlewares/upload.middleware');
-const { metersToMiles, buildGeoNearStage } = require('../utils/distanceCalculator');
+const { buildGeoNearStage } = require('../utils/distanceCalculator');
 
 /**
  * POST /api/trainers
  * Create trainer profile (protected, role=trainer)
  */
 const createTrainerProfile = asyncWrapper(async (req, res) => {
+  console.log(req.body,"data::::::::::::::::")
   const existing = await TrainerProfile.findOne({ user: req.user._id });
   if (existing) {
     return sendError(res, 409, 'Trainer profile already exists for this user.');
@@ -26,6 +26,8 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
 
   if (req.file) {
     profileData.profileImage = getFileUrl(req, req.file.filename);
+  } else if (!profileData.fullName) {
+    return sendError(res, 400, 'Profile image or full name is required.');
   }
 
   const profile = await TrainerProfile.create(profileData);
@@ -39,7 +41,8 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
  * GET /api/trainers/:id
  */
 const getTrainerById = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id).populate('user', 'fullName phoneNumber profileImage role');
+  console.log(req.params.id, "req.params.id")
+  const profile = await TrainerProfile.find({ user: req.params.id }).populate('user', 'fullName phoneNumber profileImage role');
   if (!profile) {
     return sendError(res, 404, 'Trainer profile not found.');
   }
@@ -48,9 +51,10 @@ const getTrainerById = asyncWrapper(async (req, res) => {
 
 /**
  * PUT /api/trainers/:id
+ * Update trainer profile by user ID
  */
 const updateTrainerProfile = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id);
+  const profile = await TrainerProfile.findOne({ user: req.params.id });
   if (!profile) {
     return sendError(res, 404, 'Trainer profile not found.');
   }
@@ -75,9 +79,10 @@ const updateTrainerProfile = asyncWrapper(async (req, res) => {
 
 /**
  * DELETE /api/trainers/:id
+ * Delete trainer profile by user ID
  */
 const deleteTrainerProfile = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id);
+  const profile = await TrainerProfile.findOne({ user: req.params.id });
   if (!profile) {
     return sendError(res, 404, 'Trainer profile not found.');
   }
@@ -184,10 +189,10 @@ const listTrainers = asyncWrapper(async (req, res) => {
 
 /**
  * POST /api/trainers/:id/certifications
- * Upload a certification file
+ * Upload a certification file (by user ID)
  */
 const addCertification = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id);
+  const profile = await TrainerProfile.findOne({ user: req.params.id });
   if (!profile) return sendError(res, 404, 'Trainer profile not found.');
   if (profile.user.toString() !== req.user._id.toString()) {
     return sendError(res, 403, 'Unauthorized.');
@@ -195,6 +200,7 @@ const addCertification = asyncWrapper(async (req, res) => {
 
   const { name } = req.body;
   if (!name) return sendError(res, 400, 'Certification name is required.');
+  if (!req.file) return sendError(res, 400, 'Certification file is required.');
 
   const certification = { name, uploadedAt: new Date() };
   if (req.file) {
@@ -212,9 +218,10 @@ const addCertification = asyncWrapper(async (req, res) => {
 
 /**
  * DELETE /api/trainers/:id/certifications/:certId
+ * Delete certification (by user ID)
  */
 const deleteCertification = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id);
+  const profile = await TrainerProfile.findOne({ user: req.params.id });
   if (!profile) return sendError(res, 404, 'Trainer profile not found.');
   if (profile.user.toString() !== req.user._id.toString()) {
     return sendError(res, 403, 'Unauthorized.');
@@ -234,9 +241,10 @@ const deleteCertification = asyncWrapper(async (req, res) => {
 
 /**
  * POST /api/trainers/:id/service-areas
+ * Add service area (by user ID)
  */
 const addServiceArea = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id);
+  const profile = await TrainerProfile.findOne({ user: req.params.id });
   if (!profile) return sendError(res, 404, 'Trainer profile not found.');
   if (profile.user.toString() !== req.user._id.toString()) {
     return sendError(res, 403, 'Unauthorized.');
@@ -268,9 +276,10 @@ const addServiceArea = asyncWrapper(async (req, res) => {
 
 /**
  * PUT /api/trainers/:id/service-areas/:areaId
+ * Update service area (by user ID)
  */
 const updateServiceArea = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id);
+  const profile = await TrainerProfile.findOne({ user: req.params.id });
   if (!profile) return sendError(res, 404, 'Trainer profile not found.');
   if (profile.user.toString() !== req.user._id.toString()) {
     return sendError(res, 403, 'Unauthorized.');
@@ -299,9 +308,10 @@ const updateServiceArea = asyncWrapper(async (req, res) => {
 
 /**
  * DELETE /api/trainers/:id/service-areas/:areaId
+ * Delete service area (by user ID)
  */
 const deleteServiceArea = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id);
+  const profile = await TrainerProfile.findOne({ user: req.params.id });
   if (!profile) return sendError(res, 404, 'Trainer profile not found.');
   if (profile.user.toString() !== req.user._id.toString()) {
     return sendError(res, 403, 'Unauthorized.');
@@ -321,10 +331,10 @@ const deleteServiceArea = asyncWrapper(async (req, res) => {
 
 /**
  * POST /api/trainers/:id/gallery
- * Upload gallery images (multiple)
+ * Upload gallery images (multiple, by user ID)
  */
 const addGalleryImages = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id);
+  const profile = await TrainerProfile.findOne({ user: req.params.id });
   if (!profile) return sendError(res, 404, 'Trainer profile not found.');
   if (profile.user.toString() !== req.user._id.toString()) {
     return sendError(res, 403, 'Unauthorized.');
@@ -347,10 +357,10 @@ const addGalleryImages = asyncWrapper(async (req, res) => {
 
 /**
  * DELETE /api/trainers/:id/gallery/:imageId
- * imageId here is actually the index or the encoded filename — we match by URL segment
+ * Delete gallery image (by user ID)
  */
 const deleteGalleryImage = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id);
+  const profile = await TrainerProfile.findOne({ user: req.params.id });
   if (!profile) return sendError(res, 404, 'Trainer profile not found.');
   if (profile.user.toString() !== req.user._id.toString()) {
     return sendError(res, 403, 'Unauthorized.');
@@ -373,18 +383,76 @@ const deleteGalleryImage = asyncWrapper(async (req, res) => {
 
 /**
  * GET /api/trainers/:id/dashboard
+ * Find trainer profile by user ID (frontend will send user ID)
  */
 const getTrainerDashboard = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findById(req.params.id);
+  const Service = require('../models/Service');
+  
+  const profile = await TrainerProfile.findOne({ user: req.params.id })
+    .populate('user', 'fullName phoneNumber profileImage');
+  
   if (!profile) return sendError(res, 404, 'Trainer profile not found.');
 
+  // Count services offered by this trainer
+  const servicesCount = await Service.countDocuments({ trainer: profile._id });
+
   return sendSuccess(res, 200, 'Dashboard data fetched successfully.', {
-    profileCompletionPercent: profile.profileCompletionPercent,
-    serviceAreaCount: profile.serviceAreas.length,
-    servicesOfferedCount: profile.serviceTypes.length,
-    certificationsCount: profile.certifications.length,
-    galleryImagesCount: profile.galleryImages.length,
-    categoriesCount: profile.categories.length,
+    // Profile Status
+    profileStatus: {
+      completionPercent: profile.profileCompletionPercent,
+      isComplete: profile.profileCompletionPercent === 100,
+    },
+    
+    // Basic Info
+    trainerInfo: {
+      name: profile.fullName || profile.user.fullName,
+      profileImage: profile.profileImage || profile.user.profileImage,
+      yearsOfExperience: profile.yearsOfExperience || 0,
+      specialties: profile.categories || [],
+      bio: profile.shortBio || '',
+    },
+    
+    // Counts
+    stats: {
+      serviceAreasCount: profile.serviceAreas.length,
+      servicesOfferedCount: servicesCount,
+      certificationsCount: profile.certifications.length,
+      galleryImagesCount: profile.galleryImages.length,
+    },
+    
+    // Service Types
+    serviceTypes: profile.serviceTypes.map((service) => ({
+      value: service.value,
+      type: service.value, // For backwards compatibility
+      price: service.price || 0,
+      duration: service.duration || 60,
+      count: 0, // Can be populated if you track bookings
+    })),
+    
+    // Service Areas / Venue Locations
+    venueLocations: profile.serviceAreas.map((area) => ({
+      id: area._id,
+      label: area.label || area.city,
+      address: `${area.streetAddress || ''} ${area.city || ''}`,
+      city: area.city,
+      state: area.state,
+      pincode: area.pincode,
+      coordinates: {
+        lat: area.location.coordinates[1],
+        lng: area.location.coordinates[0],
+      },
+    })),
+    
+    // Gallery Images
+    gallery: profile.galleryImages || [],
+    
+    // Certifications
+    certifications: profile.certifications.map((cert) => ({
+      id: cert._id,
+      name: cert.name,
+      fileUrl: cert.fileUrl,
+      uploadedAt: cert.uploadedAt,
+    })),
   });
 });
 

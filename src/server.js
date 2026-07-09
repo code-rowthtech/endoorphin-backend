@@ -31,7 +31,7 @@ const startServer = async () => {
   await connectDB();
 
   const server = app.listen(PORT, () => {
-    console.log(`\n🚀 Endoorphin API Server running on port ${PORT}`);
+    console.log(`\n Endoorphin API Server running on port ${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`   Base URL: http://localhost:${PORT}`);
     console.log(`   Health: http://localhost:${PORT}/health\n`);

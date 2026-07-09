@@ -33,13 +33,7 @@ const fileFilter = (req, file, cb) => {
   if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(
-      new multer.MulterError(
-        'LIMIT_UNEXPECTED_FILE',
-        `Only image files are allowed (JPG, JPEG, PNG, GIF). Received: ${file.mimetype}`
-      ),
-      false
-    );
+    cb(null, false); // Don't error, just skip invalid files
   }
 };
 
@@ -52,17 +46,107 @@ const multerConfig = {
 };
 
 /**
- * Single file upload middleware
- * @param {string} fieldName - Form field name
+ * Single file upload middleware with field name flexibility
+ * Accepts common variations of field names
+ * @param {string} primaryFieldName - Primary form field name
+ * @param {string[]} alternateFieldNames - Alternative field names to accept
  */
-const uploadSingle = (fieldName) => multer(multerConfig).single(fieldName);
+const uploadSingle = (primaryFieldName, alternateFieldNames = []) => {
+  return (req, res, next) => {
+    // Define common aliases for single file uploads
+    const commonAliases = {
+      profileImage: ['profile_image', 'profile', 'image', 'avatar'],
+      certFile: ['cert_file', 'certificate', 'cert', 'file'],
+      galleryImages: ['gallery_images', 'gallery', 'images'],
+    };
+
+    // Build list of acceptable field names
+    const acceptableNames = [primaryFieldName, ...alternateFieldNames];
+    if (commonAliases[primaryFieldName]) {
+      acceptableNames.push(...commonAliases[primaryFieldName]);
+    }
+
+    // Create a flexible multer instance that handles any of these field names
+    const flexibleUpload = multer({
+      storage,
+      fileFilter,
+      limits: { fileSize: MAX_FILE_SIZE },
+    }).single(primaryFieldName);
+
+    // Try parsing with primary field name first
+    flexibleUpload(req, res, (err) => {
+      if (err && err.code === 'LIMIT_UNEXPECTED_FILE') {
+        // If primary field fails, try to manually reassign the uploaded file
+        if (req.file) {
+          // File was uploaded with a different field name, we can proceed
+          return next();
+        }
+
+        // Create a new upload attempt that accepts any field name
+        const anyFieldUpload = (req, res, next) => {
+          const upload = multer({ storage, fileFilter, limits: { fileSize: MAX_FILE_SIZE } });
+          const multiUpload = upload.any();
+          
+          multiUpload(req, res, (multiErr) => {
+            if (multiErr) return next(multiErr);
+            
+            // If files were uploaded, move the first one to req.file
+            if (req.files && req.files.length > 0) {
+              req.file = req.files[0];
+              req.files = undefined;
+            }
+            next();
+          });
+        };
+
+        return anyFieldUpload(req, res, next);
+      }
+
+      if (err) return next(err);
+      next();
+    });
+  };
+};
 
 /**
- * Multiple files upload middleware
- * @param {string} fieldName - Form field name
+ * Multiple files upload middleware with field name flexibility
+ * @param {string} primaryFieldName - Primary form field name
  * @param {number} maxCount - Maximum number of files
+ * @param {string[]} alternateFieldNames - Alternative field names to accept
  */
-const uploadArray = (fieldName, maxCount = 10) => multer(multerConfig).array(fieldName, maxCount);
+const uploadArray = (primaryFieldName, maxCount = 10, alternateFieldNames = []) => {
+  return (req, res, next) => {
+    const flexibleUpload = multer({
+      storage,
+      fileFilter,
+      limits: { fileSize: MAX_FILE_SIZE },
+    }).array(primaryFieldName, maxCount);
+
+    flexibleUpload(req, res, (err) => {
+      if (err && err.code === 'LIMIT_UNEXPECTED_FILE') {
+        // Try accepting any field name
+        const anyFieldUpload = multer({
+          storage,
+          fileFilter,
+          limits: { fileSize: MAX_FILE_SIZE },
+        }).any();
+
+        return anyFieldUpload(req, res, (multiErr) => {
+          if (multiErr) return next(multiErr);
+
+          // Reorganize uploaded files into req.files array
+          if (req.files && req.files.length > 0) {
+            req.files = req.files;
+          }
+          next();
+        });
+      }
+
+      if (err) return next(err);
+      next();
+    });
+  };
+};
 
 /**
  * Multiple fields upload middleware

@@ -32,20 +32,13 @@ router.post(
   [
     body('fullName').optional().notEmpty().withMessage('Full name cannot be empty.').trim(),
     body('yearsOfExperience').optional().isNumeric().withMessage('Years of experience must be a number.'),
-    body('serviceTypes')
-      .optional()
-      .isArray().withMessage('Service types must be an array.')
-      .custom((arr) => {
-        const valid = ['In-Person', 'Home Visit', 'Gym Facility'];
-        return arr.every((t) => valid.includes(t));
-      }).withMessage('Service types must be one of: In-Person, Home Visit, Gym Facility.'),
   ],
   validate,
   createTrainerProfile
 );
 
 // GET /api/trainers/:id
-router.get('/:id', [param('id').isMongoId().withMessage('Invalid trainer ID.')], validate, getTrainerById);
+router.get('/:id', validate, getTrainerById);
 
 // PUT /api/trainers/:id
 router.put(
@@ -57,8 +50,6 @@ router.put(
     if (ct.includes('multipart/form-data')) return uploadSingle('profileImage')(req, res, next);
     next();
   },
-  [param('id').isMongoId().withMessage('Invalid trainer ID.')],
-  validate,
   updateTrainerProfile
 );
 
@@ -67,8 +58,6 @@ router.delete(
   '/:id',
   protect,
   restrictTo('trainer'),
-  [param('id').isMongoId().withMessage('Invalid trainer ID.')],
-  validate,
   deleteTrainerProfile
 );
 
@@ -76,8 +65,6 @@ router.delete(
 router.get(
   '/:id/dashboard',
   protect,
-  [param('id').isMongoId().withMessage('Invalid trainer ID.')],
-  validate,
   getTrainerDashboard
 );
 
@@ -88,7 +75,6 @@ router.post(
   restrictTo('trainer'),
   uploadSingle('certFile'),
   [
-    param('id').isMongoId().withMessage('Invalid trainer ID.'),
     body('name').notEmpty().withMessage('Certification name is required.'),
   ],
   validate,
@@ -100,8 +86,6 @@ router.delete(
   '/:id/certifications/:certId',
   protect,
   restrictTo('trainer'),
-  [param('id').isMongoId().withMessage('Invalid trainer ID.')],
-  validate,
   deleteCertification
 );
 
@@ -111,7 +95,6 @@ router.post(
   protect,
   restrictTo('trainer'),
   [
-    param('id').isMongoId().withMessage('Invalid trainer ID.'),
     body('city').notEmpty().withMessage('City is required.'),
   ],
   validate,
@@ -123,8 +106,6 @@ router.put(
   '/:id/service-areas/:areaId',
   protect,
   restrictTo('trainer'),
-  [param('id').isMongoId().withMessage('Invalid trainer ID.')],
-  validate,
   updateServiceArea
 );
 
@@ -133,8 +114,6 @@ router.delete(
   '/:id/service-areas/:areaId',
   protect,
   restrictTo('trainer'),
-  [param('id').isMongoId().withMessage('Invalid trainer ID.')],
-  validate,
   deleteServiceArea
 );
 
@@ -144,8 +123,6 @@ router.post(
   protect,
   restrictTo('trainer'),
   uploadArray('galleryImages', 10),
-  [param('id').isMongoId().withMessage('Invalid trainer ID.')],
-  validate,
   addGalleryImages
 );
 
@@ -154,8 +131,6 @@ router.delete(
   '/:id/gallery/:imageId',
   protect,
   restrictTo('trainer'),
-  [param('id').isMongoId().withMessage('Invalid trainer ID.')],
-  validate,
   deleteGalleryImage
 );
 
