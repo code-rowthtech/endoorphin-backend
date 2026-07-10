@@ -1,4 +1,6 @@
+const mongoose = require('mongoose');
 const VenueProfile = require('../models/VenueProfile');
+const User = require('../models/User');
 const Service = require('../models/Service');
 const Amenity = require('../models/Amenity');
 const Staff = require('../models/Staff');
@@ -43,8 +45,8 @@ const createVenue = asyncWrapper(async (req, res) => {
     lng,
     lat,
     coordinates,    // flutter array fallback
-    serviceNames,   
-    amenityNames,   
+    serviceNames,
+    amenityNames,
     services,       // flutter fallback
     amenities,      // flutter fallback
   } = req.body;
@@ -77,12 +79,12 @@ const createVenue = asyncWrapper(async (req, res) => {
     phoneNumber,
     email,
     aboutVenue,
-    address: { 
-      streetAddress: streetAddress || address, 
-      area, 
-      city, 
-      state, 
-      pincode 
+    address: {
+      streetAddress: streetAddress || address,
+      area,
+      city,
+      state,
+      pincode
     },
     location,
   };
@@ -93,7 +95,7 @@ const createVenue = asyncWrapper(async (req, res) => {
     if (logoFile) {
       venueData.logo = getFileUrl(req, logoFile.filename);
     }
-    
+
     const imageFiles = req.files.filter(f => f.fieldname === 'venueImages' || f.fieldname === 'images' || f !== logoFile);
     if (imageFiles.length > 0) {
       venueData.venueImages = imageFiles.map(f => getFileUrl(req, f.filename));
@@ -111,7 +113,12 @@ const createVenue = asyncWrapper(async (req, res) => {
   // Create services if provided
   if (finalServiceNames && finalServiceNames.length > 0) {
     const servicesDocs = await Service.insertMany(
-      finalServiceNames.map((name) => ({ name, venue: venue._id }))
+      finalServiceNames.map((item) => {
+        if (typeof item === 'object' && item !== null) {
+          return { ...item, venue: venue._id };
+        }
+        return { name: item, venue: venue._id };
+      })
     );
     venue.services = servicesDocs.map((s) => s._id);
   }
@@ -119,13 +126,26 @@ const createVenue = asyncWrapper(async (req, res) => {
   // Create amenities if provided
   if (finalAmenityNames && finalAmenityNames.length > 0) {
     const amenitiesDocs = await Amenity.insertMany(
-      finalAmenityNames.map((name) => ({ name, venue: venue._id }))
+      finalAmenityNames.map((item) => {
+        if (typeof item === 'object' && item !== null) {
+          return { ...item, venue: venue._id };
+        }
+        return { name: item, venue: venue._id };
+      })
     );
     venue.amenities = amenitiesDocs.map((a) => a._id);
   }
 
   venue.profileCompletionPercent = venue.calculateCompletion();
   await venue.save();
+
+  // Update user's email and phoneNumber if provided
+  if (phoneNumber || email) {
+    const userUpdate = {};
+    if (phoneNumber) userUpdate.phoneNumber = phoneNumber;
+    if (email) userUpdate.email = email;
+    await User.findByIdAndUpdate(req.user._id, userUpdate);
+  }
 
   return sendSuccess(res, 201, 'Venue registered successfully.', { venue });
 });
@@ -158,43 +178,107 @@ const getVenueById = asyncWrapper(async (req, res) => {
  * PUT /api/venues/:id
  */
 const updateVenue = asyncWrapper(async (req, res) => {
-  const venue = await VenueProfile.findById(req.params.id);
-  if (!venue) return sendError(res, 404, 'Venue not found.');
-  if (venue.owner.toString() !== req.user._id.toString()) {
-    return sendError(res, 403, 'Unauthorized.');
-  }
+  try {
+    const venue = await VenueProfile.findById(req.params.id);
+    if (!venue) return sendError(res, 404, 'Venue not found.');
+    if (venue.owner.toString() !== req.user._id.toString()) {
+      return sendError(res, 403, 'Unauthorized.');
+    }
 
-  const allowedFields = ['companyName', 'phoneNumber', 'email', 'aboutVenue'];
-  allowedFields.forEach((field) => {
-    if (req.body[field] !== undefined) venue[field] = req.body[field];
-  });
+    const allowedFields = ['companyName', 'phoneNumber', 'email', 'aboutVenue'];
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) venue[field] = req.body[field];
+    });
 
-  // Update address
-  if (req.body.streetAddress || req.body.area || req.body.city || req.body.state || req.body.pincode) {
-    venue.address = {
-      streetAddress: req.body.streetAddress || venue.address?.streetAddress,
-      area: req.body.area || venue.address?.area,
-      city: req.body.city || venue.address?.city,
-      state: req.body.state || venue.address?.state,
-      pincode: req.body.pincode || venue.address?.pincode,
-    };
-  }
+    // Update address
+    if (req.body.streetAddress || req.body.address || req.body.area || req.body.city || req.body.state || req.body.pincode) {
+      venue.address = {
+        streetAddress: req.body.streetAddress || req.body.address || venue.address?.streetAddress,
+        area: req.body.area || venue.address?.area,
+        city: req.body.city || venue.address?.city,
+        state: req.body.state || venue.address?.state,
+        pincode: req.body.pincode || venue.address?.pincode,
+      };
+    }
 
-  // Update location
-  if (req.body.lng || req.body.lat) {
+    // Update location
+    let finalLng = venue.location.coordinates[0];
+    let finalLat = venue.location.coordinates[1];
+
+    if (req.body.lng !== undefined) finalLng = parseFloat(req.body.lng) || finalLng;
+    if (req.body.lat !== undefined) finalLat = parseFloat(req.body.lat) || finalLat;
+
+    if (req.body.coordinates) {
+      let parsedCoords = parseJSONField(req.body.coordinates);
+      if (Array.isArray(parsedCoords) && parsedCoords.length >= 2) {
+        finalLng = parseFloat(parsedCoords[0]) || finalLng;
+        finalLat = parseFloat(parsedCoords[1]) || finalLat;
+      }
+    }
+
     venue.location = {
       type: 'Point',
-      coordinates: [
-        parseFloat(req.body.lng) || venue.location.coordinates[0],
-        parseFloat(req.body.lat) || venue.location.coordinates[1],
-      ],
+      coordinates: [finalLng, finalLat],
     };
+
+    // Update Logo
+    if (req.file) {
+      venue.logo = getFileUrl(req, req.file.filename);
+    }
+
+    // Update Services
+    if (req.body.serviceNames !== undefined || req.body.services !== undefined) {
+      await Service.deleteMany({ venue: venue._id });
+      let finalServiceNames = ensureArray(parseJSONField(req.body.serviceNames || req.body.services));
+      if (finalServiceNames && finalServiceNames.length > 0) {
+        const servicesDocs = await Service.insertMany(
+          finalServiceNames.map((item) => {
+            if (typeof item === 'object' && item !== null) {
+              return { ...item, venue: venue._id };
+            }
+            return { name: item, venue: venue._id };
+          })
+        );
+        venue.services = servicesDocs.map((s) => s._id);
+      } else {
+        venue.services = [];
+      }
+    }
+
+    // Update Amenities
+    if (req.body.amenityNames !== undefined || req.body.amenities !== undefined) {
+      await Amenity.deleteMany({ venue: venue._id });
+      let finalAmenityNames = ensureArray(parseJSONField(req.body.amenityNames || req.body.amenities));
+      if (finalAmenityNames && finalAmenityNames.length > 0) {
+        const amenitiesDocs = await Amenity.insertMany(
+          finalAmenityNames.map((item) => {
+            if (typeof item === 'object' && item !== null) {
+              return { ...item, venue: venue._id };
+            }
+            return { name: item, venue: venue._id };
+          })
+        );
+        venue.amenities = amenitiesDocs.map((a) => a._id);
+      } else {
+        venue.amenities = [];
+      }
+    }
+
+    venue.profileCompletionPercent = venue.calculateCompletion();
+    await venue.save();
+
+    // Update user's email and phoneNumber if provided
+    if (req.body.phone || req.body.email) {
+      const userUpdate = {};
+      if (req.body.phone) userUpdate.phoneNumber = req.body.phone;
+      if (req.body.email) userUpdate.email = req.body.email;
+      await User.findByIdAndUpdate(req.user._id, userUpdate);
+    }
+
+    return sendSuccess(res, 200, 'Venue updated successfully.', { venue });
+  } catch (error) {
+    console.error(error, 'error')
   }
-
-  venue.profileCompletionPercent = venue.calculateCompletion();
-  await venue.save();
-
-  return sendSuccess(res, 200, 'Venue updated successfully.', { venue });
 });
 
 /**
@@ -215,11 +299,13 @@ const deleteVenue = asyncWrapper(async (req, res) => {
  * List/search venues with filters
  */
 const listVenues = asyncWrapper(async (req, res) => {
+  console.log('checkinggg')
   const {
     search,
     category,
     lat,
     lng,
+    ownerId,
     minDistance = 0,
     maxDistance = 50,
     page = 1,
@@ -253,6 +339,11 @@ const listVenues = asyncWrapper(async (req, res) => {
     );
 
     const matchStage = { ...categoryMatch };
+    if (ownerId && mongoose.isValidObjectId(ownerId)) {
+      matchStage.owner = new mongoose.Types.ObjectId(ownerId);
+    } else if (ownerId) {
+      matchStage.owner = ownerId; // Let it fail or match nothing if invalid
+    }
     if (search) {
       matchStage.$or = [
         { companyName: { $regex: search, $options: 'i' } },
@@ -273,10 +364,14 @@ const listVenues = asyncWrapper(async (req, res) => {
 
     pipeline.push({ $skip: skip }, { $limit: limitNum });
 
-    const venues = await VenueProfile.aggregate(pipeline);
-    
-    // We should populate after aggregation, or we can just send as is. 
-    // Usually, aggregation needs explicit $lookup for population. But let's keep it consistent with what was there.
+    let venues = await VenueProfile.aggregate(pipeline);
+
+    venues = await VenueProfile.populate(venues, [
+      { path: 'owner', select: 'fullName phoneNumber' },
+      { path: 'services' },
+      { path: 'amenities' }
+    ]);
+
     return sendSuccess(res, 200, 'Venues fetched successfully.', {
       venues,
       pagination: { page: pageNum, limit: limitNum, total: venues.length },
@@ -285,6 +380,7 @@ const listVenues = asyncWrapper(async (req, res) => {
 
   // Non-geo search
   const query = { ...categoryMatch };
+  if (ownerId) query.owner = ownerId;
   if (search) {
     query.$or = [
       { companyName: { $regex: search, $options: 'i' } },
@@ -296,8 +392,8 @@ const listVenues = asyncWrapper(async (req, res) => {
   const total = await VenueProfile.countDocuments(query);
   const venues = await VenueProfile.find(query)
     .populate('owner', 'fullName phoneNumber')
-    .populate('services', 'name')
-    .populate('amenities', 'name icon')
+    .populate('services')
+    .populate('amenities')
     .skip(skip)
     .limit(limitNum)
     .lean();
@@ -409,6 +505,28 @@ const getVenueDashboard = asyncWrapper(async (req, res) => {
   });
 });
 
+/**
+ * PUT /api/venues/:id/business-days
+ */
+const updateBusinessDays = asyncWrapper(async (req, res) => {
+  const venue = await VenueProfile.findById(req.params.id);
+  if (!venue) return sendError(res, 404, 'Venue not found.');
+  if (venue.owner.toString() !== req.user._id.toString()) {
+    return sendError(res, 403, 'Unauthorized.');
+  }
+
+  const { businessDays } = req.body;
+  if (!Array.isArray(businessDays)) {
+    return sendError(res, 400, 'businessDays must be an array.');
+  }
+
+  venue.businessDays = businessDays;
+  venue.profileCompletionPercent = venue.calculateCompletion();
+  await venue.save();
+
+  return sendSuccess(res, 200, 'Business days updated successfully.', { businessDays: venue.businessDays });
+});
+
 module.exports = {
   createVenue,
   addAnotherVenue,
@@ -420,4 +538,5 @@ module.exports = {
   uploadVenueImages,
   deleteVenueImage,
   getVenueDashboard,
+  updateBusinessDays,
 };
