@@ -11,6 +11,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-7d}
       - OTP_EXPIRY_MINUTES=${OTP_EXPIRY_MINUTES:-5}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
       - uploads_data:/app/uploads
     depends_on:
