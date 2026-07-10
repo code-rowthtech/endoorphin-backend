@@ -7,6 +7,23 @@ const asyncWrapper = require('../utils/asyncWrapper');
 const { getFileUrl } = require('../middlewares/upload.middleware');
 const { buildGeoNearStage } = require('../utils/distanceCalculator');
 
+const parseJSONField = (field) => {
+  if (!field) return field;
+  if (typeof field === 'string') {
+    try {
+      return JSON.parse(field);
+    } catch (e) {
+      return field;
+    }
+  }
+  return field;
+};
+
+const ensureArray = (value) => {
+  if (value === undefined || value === null) return value;
+  return Array.isArray(value) ? value : [value];
+};
+
 /**
  * POST /api/venues
  * Register a venue — full multi-step payload in one call
@@ -17,6 +34,7 @@ const createVenue = asyncWrapper(async (req, res) => {
     phoneNumber,
     email,
     aboutVenue,
+    address,        // flutter fallback
     streetAddress,
     area,
     city,
@@ -24,18 +42,33 @@ const createVenue = asyncWrapper(async (req, res) => {
     pincode,
     lng,
     lat,
-    serviceNames,   // array of service names (strings)
-    amenityNames,   // array of amenity names (strings)
+    coordinates,    // flutter array fallback
+    serviceNames,   
+    amenityNames,   
+    services,       // flutter fallback
+    amenities,      // flutter fallback
   } = req.body;
 
   if (!companyName) {
     return sendError(res, 400, 'Company name is required.');
   }
 
+  let finalLng = parseFloat(lng) || 0;
+  let finalLat = parseFloat(lat) || 0;
+
+  // Handle coordinates array from flutter
+  if (coordinates) {
+    let parsedCoords = parseJSONField(coordinates);
+    if (Array.isArray(parsedCoords) && parsedCoords.length >= 2) {
+      finalLng = parseFloat(parsedCoords[0]) || finalLng;
+      finalLat = parseFloat(parsedCoords[1]) || finalLat;
+    }
+  }
+
   // Build location
   const location = {
     type: 'Point',
-    coordinates: [parseFloat(lng) || 0, parseFloat(lat) || 0],
+    coordinates: [finalLng, finalLat],
   };
 
   const venueData = {
@@ -44,32 +77,51 @@ const createVenue = asyncWrapper(async (req, res) => {
     phoneNumber,
     email,
     aboutVenue,
-    address: { streetAddress, area, city, state, pincode },
+    address: { 
+      streetAddress: streetAddress || address, 
+      area, 
+      city, 
+      state, 
+      pincode 
+    },
     location,
   };
 
-  if (req.file) {
+  // Handle flexible file uploads (uploadAny populates req.files array)
+  if (req.files && req.files.length > 0) {
+    const logoFile = req.files.find(f => f.fieldname === 'logo') || req.files[0];
+    if (logoFile) {
+      venueData.logo = getFileUrl(req, logoFile.filename);
+    }
+    
+    const imageFiles = req.files.filter(f => f.fieldname === 'venueImages' || f.fieldname === 'images' || f !== logoFile);
+    if (imageFiles.length > 0) {
+      venueData.venueImages = imageFiles.map(f => getFileUrl(req, f.filename));
+    }
+  } else if (req.file) {
     venueData.logo = getFileUrl(req, req.file.filename);
   }
 
   const venue = await VenueProfile.create(venueData);
 
+  // Normalize service & amenity arrays
+  let finalServiceNames = ensureArray(parseJSONField(serviceNames || services));
+  let finalAmenityNames = ensureArray(parseJSONField(amenityNames || amenities));
+
   // Create services if provided
-  if (serviceNames && serviceNames.length > 0) {
-    const names = Array.isArray(serviceNames) ? serviceNames : [serviceNames];
-    const services = await Service.insertMany(
-      names.map((name) => ({ name, venue: venue._id }))
+  if (finalServiceNames && finalServiceNames.length > 0) {
+    const servicesDocs = await Service.insertMany(
+      finalServiceNames.map((name) => ({ name, venue: venue._id }))
     );
-    venue.services = services.map((s) => s._id);
+    venue.services = servicesDocs.map((s) => s._id);
   }
 
   // Create amenities if provided
-  if (amenityNames && amenityNames.length > 0) {
-    const names = Array.isArray(amenityNames) ? amenityNames : [amenityNames];
-    const amenities = await Amenity.insertMany(
-      names.map((name) => ({ name, venue: venue._id }))
+  if (finalAmenityNames && finalAmenityNames.length > 0) {
+    const amenitiesDocs = await Amenity.insertMany(
+      finalAmenityNames.map((name) => ({ name, venue: venue._id }))
     );
-    venue.amenities = amenities.map((a) => a._id);
+    venue.amenities = amenitiesDocs.map((a) => a._id);
   }
 
   venue.profileCompletionPercent = venue.calculateCompletion();
@@ -178,6 +230,14 @@ const listVenues = asyncWrapper(async (req, res) => {
   const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10)));
   const skip = (pageNum - 1) * limitNum;
 
+  // Handle category filter by fetching matching service IDs
+  let categoryMatch = {};
+  if (category) {
+    const services = await Service.find({ name: { $regex: category, $options: 'i' } }).select('_id');
+    const serviceIds = services.map((s) => s._id);
+    categoryMatch = { services: { $in: serviceIds } };
+  }
+
   if (lat && lng) {
     const pipeline = [];
 
@@ -192,7 +252,7 @@ const listVenues = asyncWrapper(async (req, res) => {
       )
     );
 
-    const matchStage = {};
+    const matchStage = { ...categoryMatch };
     if (search) {
       matchStage.$or = [
         { companyName: { $regex: search, $options: 'i' } },
@@ -214,6 +274,9 @@ const listVenues = asyncWrapper(async (req, res) => {
     pipeline.push({ $skip: skip }, { $limit: limitNum });
 
     const venues = await VenueProfile.aggregate(pipeline);
+    
+    // We should populate after aggregation, or we can just send as is. 
+    // Usually, aggregation needs explicit $lookup for population. But let's keep it consistent with what was there.
     return sendSuccess(res, 200, 'Venues fetched successfully.', {
       venues,
       pagination: { page: pageNum, limit: limitNum, total: venues.length },
@@ -221,7 +284,7 @@ const listVenues = asyncWrapper(async (req, res) => {
   }
 
   // Non-geo search
-  const query = {};
+  const query = { ...categoryMatch };
   if (search) {
     query.$or = [
       { companyName: { $regex: search, $options: 'i' } },

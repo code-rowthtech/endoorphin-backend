@@ -8,8 +8,16 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Allowed image MIME types
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
+// Allowed image and document MIME types
+const ALLOWED_MIME_TYPES = [
+  'image/jpeg', 
+  'image/jpg', 
+  'image/png', 
+  'image/gif',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document' // .docx
+];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 /**
@@ -166,4 +174,9 @@ const getFileUrl = (req, filename) => {
   return `${protocol}://${host}/uploads/${filename}`;
 };
 
-module.exports = { uploadSingle, uploadArray, uploadFields, getFileUrl };
+/**
+ * Accept any files
+ */
+const uploadAny = () => multer(multerConfig).any();
+
+module.exports = { uploadSingle, uploadArray, uploadFields, uploadAny, getFileUrl };

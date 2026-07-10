@@ -37,4 +37,16 @@ router.delete(
   deleteUser
 );
 
+// PUT /api/users/:id/language
+router.put(
+  '/:id/language',
+  protect,
+  [
+    param('id').isMongoId().withMessage('Invalid user ID.'),
+    body('language').notEmpty().withMessage('Language cannot be empty.').trim(),
+  ],
+  validate,
+  require('../controllers/user.controller').updateLanguage
+);
+
 module.exports = router;

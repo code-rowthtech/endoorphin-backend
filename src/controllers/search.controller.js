@@ -1,5 +1,6 @@
 const TrainerProfile = require('../models/TrainerProfile');
 const VenueProfile = require('../models/VenueProfile');
+const Favorite = require('../models/Favorite');
 const { sendSuccess, sendError } = require('../utils/apiResponse');
 const asyncWrapper = require('../utils/asyncWrapper');
 const { buildGeoNearStage } = require('../utils/distanceCalculator');
@@ -120,54 +121,101 @@ const unifiedSearch = asyncWrapper(async (req, res) => {
 /**
  * GET /api/search/nearby
  * For map view pins — returns both venues and trainers within radius
+ * Query params:
+ *   - lat, lng (required)
+ *   - radius (default 10 miles)
+ *   - type: 'venue' | 'trainer' | omit for both
  */
 const nearbySearch = asyncWrapper(async (req, res) => {
-  const { lat, lng, radius = 10 } = req.query;
+  const { lat, lng, radius = 10, type } = req.query;
 
   if (!lat || !lng) {
     return sendError(res, 400, 'Latitude (lat) and longitude (lng) are required.');
   }
 
-  const venuePipeline = [
-    buildGeoNearStage(
-      parseFloat(lng),
-      parseFloat(lat),
-      parseFloat(radius),
-      0,
-      'distanceInMeters',
-      'location'
-    ),
-    {
-      $addFields: {
-        distanceInMiles: { $divide: ['$distanceInMeters', 1609.344] },
-        resultType: 'venue',
-      },
-    },
-    { $limit: 100 },
-  ];
+  // Fetch user's favorites in one query
+  const userFavorites = await Favorite.find({ user: req.user._id }).lean();
 
-  const trainerPipeline = [
-    buildGeoNearStage(
-      parseFloat(lng),
-      parseFloat(lat),
-      parseFloat(radius),
-      0,
-      'distanceInMeters',
-      'serviceAreas.location'
-    ),
-    {
-      $addFields: {
-        distanceInMiles: { $divide: ['$distanceInMeters', 1609.344] },
-        resultType: 'trainer',
-      },
-    },
-    { $limit: 100 },
-  ];
+  // Build lookup maps for O(1) checking: targetId -> favoriteId
+  const favoriteVenueMap = new Map(
+    userFavorites
+      .filter((f) => f.targetType === 'venue')
+      .map((f) => [f.targetId.toString(), f._id.toString()])
+  );
+  const favoriteTrainerMap = new Map(
+    userFavorites
+      .filter((f) => f.targetType === 'trainer')
+      .map((f) => [f.targetId.toString(), f._id.toString()])
+  );
 
-  const [venues, trainers] = await Promise.all([
-    VenueProfile.aggregate(venuePipeline),
-    TrainerProfile.aggregate(trainerPipeline),
-  ]);
+  let venues = [];
+  let trainers = [];
+
+  // Fetch venues if type is 'venue' or not specified
+  if (!type || type === 'venue') {
+    const venuePipeline = [
+      buildGeoNearStage(
+        parseFloat(lng),
+        parseFloat(lat),
+        parseFloat(radius),
+        0,
+        'distanceInMeters',
+        'location'
+      ),
+      {
+        $addFields: {
+          distanceInMiles: { $divide: ['$distanceInMeters', 1609.344] },
+          resultType: 'venue',
+        },
+      },
+      { $limit: 100 },
+    ];
+
+    venues = await VenueProfile.aggregate(venuePipeline);
+
+    // Add isFavorite and favoriteId
+    venues = venues.map((v) => {
+      const favId = favoriteVenueMap.get(v._id.toString());
+      return {
+        ...v,
+        isFavorite: !!favId,
+        ...(favId && { favoriteId: favId }),
+      };
+    });
+  }
+
+  // Fetch trainers if type is 'trainer' or not specified
+  if (!type || type === 'trainer') {
+    const trainerPipeline = [
+      buildGeoNearStage(
+        parseFloat(lng),
+        parseFloat(lat),
+        parseFloat(radius),
+        0,
+        'distanceInMeters',
+        'serviceAreas.location'
+      ),
+      {
+        $addFields: {
+          distanceInMiles: { $divide: ['$distanceInMeters', 1609.344] },
+          resultType: 'trainer',
+        },
+      },
+      { $limit: 100 },
+    ];
+
+    trainers = await TrainerProfile.aggregate(trainerPipeline);
+
+    // Add isFavorite and favoriteId
+    trainers = trainers.map((t) => {
+      const favId = favoriteTrainerMap.get(t._id.toString());
+      return {
+        ...t,
+        isFavorite: !!favId,
+        ...(favId && { favoriteId: favId }),
+      };
+    });
+  }
 
   return sendSuccess(res, 200, 'Nearby results fetched successfully.', {
     venues,

@@ -15,7 +15,7 @@ const {
 } = require('../controllers/venue.controller');
 const { protect, restrictTo } = require('../middlewares/auth.middleware');
 const validate = require('../middlewares/validate.middleware');
-const { uploadSingle, uploadArray } = require('../middlewares/upload.middleware');
+const { uploadSingle, uploadArray, uploadAny } = require('../middlewares/upload.middleware');
 
 // GET /api/venues — list/search
 router.get('/', listVenues);
@@ -25,7 +25,7 @@ router.post(
   '/',
   protect,
   restrictTo('venue_owner'),
-  uploadSingle('logo'),
+  uploadAny(),
   [
     body('companyName').notEmpty().withMessage('Company name is required.').trim(),
   ],
@@ -66,7 +66,7 @@ router.post(
   '/:id/add-another',
   protect,
   restrictTo('venue_owner'),
-  uploadSingle('logo'),
+  uploadAny(),
   [body('companyName').notEmpty().withMessage('Company name is required.')],
   validate,
   addAnotherVenue

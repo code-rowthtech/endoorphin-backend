@@ -4,3 +4,8 @@ package-lock.json
 Endoorphin.postman_collection.json
 Endoorphin.postman_environment.json
 uploads/
+Endoorphin_API.postman_collection.json
+generate-postman.js
+test_inbound.js
+test_db.js
+test_query.js
