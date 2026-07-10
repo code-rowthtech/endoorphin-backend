@@ -75,6 +75,27 @@ const venueProfileSchema = new mongoose.Schema(
         ref: 'Staff',
       },
     ],
+    businessDays: [
+      {
+        day: {
+          type: String,
+          enum: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+          required: true,
+        },
+        isOpen: {
+          type: Boolean,
+          default: true,
+        },
+        openTime: {
+          type: String,
+          default: '09:00',
+        },
+        closeTime: {
+          type: String,
+          default: '18:00',
+        },
+      }
+    ],
     profileCompletionPercent: {
       type: Number,
       default: 0,
@@ -103,6 +124,7 @@ venueProfileSchema.methods.calculateCompletion = function () {
     this.services && this.services.length > 0,
     this.amenities && this.amenities.length > 0,
     this.staff && this.staff.length > 0,
+    this.businessDays && this.businessDays.length > 0,
   ];
   const filled = fields.filter(Boolean).length;
   return Math.round((filled / fields.length) * 100);

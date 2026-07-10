@@ -12,6 +12,7 @@ const {
   uploadVenueImages,
   deleteVenueImage,
   getVenueDashboard,
+  updateBusinessDays,
 } = require('../controllers/venue.controller');
 const { protect, restrictTo } = require('../middlewares/auth.middleware');
 const validate = require('../middlewares/validate.middleware');
@@ -80,6 +81,19 @@ router.get(
   [param('id').isMongoId().withMessage('Invalid venue ID.')],
   validate,
   getVenueDashboard
+);
+
+// PUT /api/venues/:id/business-days
+router.put(
+  '/:id/business-days',
+  protect,
+  restrictTo('venue_owner'),
+  [
+    param('id').isMongoId().withMessage('Invalid venue ID.'),
+    body('businessDays').isArray().withMessage('businessDays must be an array.')
+  ],
+  validate,
+  updateBusinessDays
 );
 
 // POST /api/venues/:id/logo — upload logo

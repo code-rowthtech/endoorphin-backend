@@ -4,6 +4,20 @@ const { sendSuccess, sendError } = require('../utils/apiResponse');
 const asyncWrapper = require('../utils/asyncWrapper');
 const { getFileUrl } = require('../middlewares/upload.middleware');
 
+const processExpertise = (expertise) => {
+  if (expertise === undefined || expertise === null) return expertise;
+  if (Array.isArray(expertise)) return expertise.join(', ');
+  if (typeof expertise === 'string') {
+    try {
+      const parsed = JSON.parse(expertise);
+      if (Array.isArray(parsed)) return parsed.join(', ');
+    } catch (e) {
+      return expertise;
+    }
+  }
+  return String(expertise);
+};
+
 /**
  * POST /api/venues/:venueId/staff
  */
@@ -15,8 +29,10 @@ const addStaff = asyncWrapper(async (req, res) => {
     return sendError(res, 403, 'Unauthorized.');
   }
 
-  const { name, role, phoneNumber, yearsOfExperience, expertise } = req.body;
+  let { name, role, phoneNumber, yearsOfExperience, expertise } = req.body;
   if (!name) return sendError(res, 400, 'Staff name is required.');
+
+  expertise = processExpertise(expertise);
 
   const staffData = { venue: venueId, name, role, phoneNumber, yearsOfExperience, expertise };
   if (req.file) {
@@ -53,11 +69,13 @@ const updateStaff = asyncWrapper(async (req, res) => {
     return sendError(res, 403, 'Unauthorized.');
   }
 
-  const { name, role, phoneNumber, yearsOfExperience, expertise } = req.body;
+  let { name, role, phoneNumber, yearsOfExperience, expertise } = req.body;
   if (name !== undefined) staffMember.name = name;
   if (role !== undefined) staffMember.role = role;
   if (phoneNumber !== undefined) staffMember.phoneNumber = phoneNumber;
   if (yearsOfExperience !== undefined) staffMember.yearsOfExperience = yearsOfExperience;
+  
+  expertise = processExpertise(expertise);
   if (expertise !== undefined) staffMember.expertise = expertise;
 
   if (req.file) {
