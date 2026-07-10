@@ -18,7 +18,7 @@ const {
 } = require('../controllers/trainer.controller');
 const { protect, restrictTo } = require('../middlewares/auth.middleware');
 const validate = require('../middlewares/validate.middleware');
-const { uploadSingle, uploadArray } = require('../middlewares/upload.middleware');
+const { uploadAny, uploadSingle, uploadArray } = require('../middlewares/upload.middleware');
 
 // GET /api/trainers — list/search
 router.get('/', listTrainers);
@@ -28,7 +28,7 @@ router.post(
   '/',
   protect,
   restrictTo('trainer'),
-  uploadSingle('profileImage'),
+  uploadAny(),
   [
     body('fullName').optional().notEmpty().withMessage('Full name cannot be empty.').trim(),
     body('yearsOfExperience').optional().isNumeric().withMessage('Years of experience must be a number.'),
@@ -42,12 +42,14 @@ router.get('/:id', validate, getTrainerById);
 
 // PUT /api/trainers/:id
 router.put(
-  '/:id',
+  '/',
   protect,
   restrictTo('trainer'),
   (req, res, next) => {
     const ct = req.headers['content-type'] || '';
-    if (ct.includes('multipart/form-data')) return uploadSingle('profileImage')(req, res, next);
+    if (ct.includes('multipart/form-data')) {
+      return uploadAny()(req, res, next);
+    }
     next();
   },
   updateTrainerProfile
@@ -74,10 +76,6 @@ router.post(
   protect,
   restrictTo('trainer'),
   uploadSingle('certFile'),
-  [
-    body('name').notEmpty().withMessage('Certification name is required.'),
-  ],
-  validate,
   addCertification
 );
 

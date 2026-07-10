@@ -2,6 +2,7 @@ const User = require('../models/User');
 const { sendSuccess, sendError } = require('../utils/apiResponse');
 const asyncWrapper = require('../utils/asyncWrapper');
 const { getFileUrl } = require('../middlewares/upload.middleware');
+const { SUPPORTED_LANGUAGES, isSupportedLanguage } = require('../config/supportedLanguages');
 
 /**
  * GET /api/users/:id
@@ -66,4 +67,36 @@ const deleteUser = asyncWrapper(async (req, res) => {
   return sendSuccess(res, 200, 'User account deactivated successfully.', {});
 });
 
-module.exports = { getUserById, updateUser, deleteUser };
+/**
+ * PUT /api/users/:id/language
+ * Update preferred language
+ */
+const updateLanguage = asyncWrapper(async (req, res) => {
+  if (req.user._id.toString() !== req.params.id) {
+    return sendError(res, 403, 'You are not authorized to update this user.');
+  }
+
+  const { language } = req.body;
+  if (!language) {
+    return sendError(res, 400, 'Language is required.');
+  }
+
+  if (!isSupportedLanguage(language)) {
+    return sendError(res, 400, `Unsupported language. Supported languages: ${SUPPORTED_LANGUAGES.join(', ')}`);
+  }
+
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    { preferredLanguage: language },
+    { new: true }
+  ).select('-__v');
+
+  if (!user) {
+    return sendError(res, 404, 'User not found.');
+  }
+
+  return sendSuccess(res, 200, 'Language preference updated successfully.', { user });
+});
+
+module.exports = { getUserById, updateUser, deleteUser, updateLanguage };
+

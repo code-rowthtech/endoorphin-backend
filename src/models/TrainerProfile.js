@@ -66,10 +66,10 @@ const trainerProfileSchema = new mongoose.Schema(
       type: [{
         value: {
           type: String,
-          enum: {
-            values: ['In-Person', 'Home Visit', 'Gym Facility'],
-            message: 'Service type must be one of: In-Person, Home Visit, Gym Facility',
-          },
+          // enum: {
+          //   values: ['In-Person', 'Home Visit', 'Gym Facility'],
+          //   message: 'Service type must be one of: In-Person, Home Visit, Gym Facility',
+          // },
         },
         price: { type: Number, default: 0 },
         duration: { type: Number, default: 60 }, // in minutes

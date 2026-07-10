@@ -21,10 +21,17 @@ const { errorHandler, notFound } = require('./middlewares/error.middleware');
 
 const app = express();
 
+const translationMiddleware = require('./middlewares/translation.middleware');
+const inboundTranslationMiddleware = require('./middlewares/inboundTranslation.middleware');
+
 // ─── Global Middleware ────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Apply dynamic translation middlewares
+app.use(translationMiddleware);       // Outbound (res.json)
+app.use(inboundTranslationMiddleware); // Inbound (req.body)
 
 // Morgan logging — use 'dev' in development, 'combined' in production
 if (process.env.NODE_ENV !== 'test') {

@@ -4,45 +4,146 @@ const asyncWrapper = require('../utils/asyncWrapper');
 const { getFileUrl } = require('../middlewares/upload.middleware');
 const { buildGeoNearStage } = require('../utils/distanceCalculator');
 
+const parseJSONField = (field) => {
+  if (!field) return field;
+  if (typeof field === 'string') {
+    try {
+      field = JSON.parse(field);
+    } catch (e) {
+      return field;
+    }
+  }
+  // If it's an array, parse each element that might be a JSON string
+  if (Array.isArray(field)) {
+    return field.map((item) => {
+      if (typeof item === 'string') {
+        try {
+          return JSON.parse(item);
+        } catch (e) {
+          return item;
+        }
+      }
+      return item;
+    });
+  }
+  return field;
+};
+
+const ensureArray = (value) => {
+  if (value === undefined || value === null) return value; // Let schema defaults apply if undefined
+  return Array.isArray(value) ? value : [value];
+};
+
 /**
  * POST /api/trainers
  * Create trainer profile (protected, role=trainer)
  */
 const createTrainerProfile = asyncWrapper(async (req, res) => {
-  console.log(req.body,"data::::::::::::::::")
-  const existing = await TrainerProfile.findOne({ user: req.user._id });
-  if (existing) {
-    return sendError(res, 409, 'Trainer profile already exists for this user.');
+  try {
+    const existing = await TrainerProfile.findOne({ user: req.user._id });
+    if (existing) {
+      return sendError(res, 409, 'Trainer profile already exists for this user.');
+    }
+
+    let parsedCategories = parseJSONField(req.body.categories);
+    let parsedServiceTypes = parseJSONField(req.body.serviceTypes);
+    let parsedServiceAreas = parseJSONField(req.body.serviceAreas);
+    let parsedCertifications = parseJSONField(req.body.certifications);
+    let parsedGalleryImages = parseJSONField(req.body.galleryImages);
+
+    // If it parsed into a single object (or was passed as a single string), wrap in array
+    if (req.body.categories !== undefined) {
+      parsedCategories = ensureArray(parsedCategories);
+    }
+    if (req.body.serviceTypes !== undefined) {
+      parsedServiceTypes = ensureArray(parsedServiceTypes);
+    }
+    if (req.body.serviceAreas !== undefined) {
+      parsedServiceAreas = ensureArray(parsedServiceAreas).map(area => ({
+        ...area,
+        location: {
+          type: 'Point',
+          coordinates: [parseFloat(area.lng) || 0, parseFloat(area.lat) || 0]
+        }
+      }));
+    }
+    if (req.body.certifications !== undefined) {
+      parsedCertifications = ensureArray(parsedCertifications).map(cert => {
+        const nameFromUrl = cert.fileUrl ? cert.fileUrl.split('/').pop().replace(/\.[^/.]+$/, '') : 'Untitled';
+        return {
+          name: cert.name || nameFromUrl,
+          fileUrl: cert.fileUrl || null,
+          uploadedAt: cert.uploadedAt || new Date(),
+        };
+      });
+    }
+    if (req.body.galleryImages !== undefined) {
+      parsedGalleryImages = ensureArray(parsedGalleryImages);
+    }
+
+    const profileData = {
+      user: req.user._id,
+      fullName: req.body.fullName || req.user.fullName,
+      yearsOfExperience: req.body.yearsOfExperience,
+      shortBio: req.body.shortBio,
+      categories: parsedCategories,
+      serviceTypes: parsedServiceTypes,
+    };
+    if (parsedServiceAreas) profileData.serviceAreas = parsedServiceAreas;
+    if (parsedCertifications) profileData.certifications = parsedCertifications;
+    if (parsedGalleryImages) profileData.galleryImages = parsedGalleryImages;
+
+    // Handle directly uploaded files from uploadAny()
+    if (req.files && Array.isArray(req.files)) {
+      const profileImages = req.files.filter(f => f.fieldname.toLowerCase().includes('profile'));
+      const certFiles = req.files.filter(f => f.fieldname.toLowerCase().includes('cert'));
+      const galleryFiles = req.files.filter(f => f.fieldname.toLowerCase().includes('gallery'));
+
+      if (profileImages.length > 0) {
+        profileData.profileImage = getFileUrl(req, profileImages[0].filename);
+      }
+      if (certFiles.length > 0) {
+        const uploadedCerts = certFiles.map((file) => ({
+          name: file.originalname.replace(/\.[^/.]+$/, ''), // strip extension
+          fileUrl: getFileUrl(req, file.filename),
+          uploadedAt: new Date(),
+        }));
+        profileData.certifications = profileData.certifications
+          ? [...profileData.certifications, ...uploadedCerts]
+          : uploadedCerts;
+      }
+      if (galleryFiles.length > 0) {
+        const uploadedGallery = galleryFiles.map((file) => getFileUrl(req, file.filename));
+        profileData.galleryImages = profileData.galleryImages
+          ? [...profileData.galleryImages, ...uploadedGallery]
+          : uploadedGallery;
+      }
+    } else if (req.file) {
+      // Fallback if somehow using uploadSingle
+      profileData.profileImage = getFileUrl(req, req.file.filename);
+    }
+    
+    if (!profileData.profileImage && !profileData.fullName) {
+      return sendError(res, 400, 'Profile image or full name is required.');
+    }
+
+    const profile = await TrainerProfile.create(profileData);
+    profile.profileCompletionPercent = profile.calculateCompletion();
+    await profile.save();
+
+    return sendSuccess(res, 201, 'Trainer profile created successfully.', { profile });
+
+  } catch (error) {
+    console.error(error, 'error')
+    return sendError(res, 400, 'Trainer profile not created.');
   }
-
-  const profileData = {
-    user: req.user._id,
-    fullName: req.body.fullName || req.user.fullName,
-    yearsOfExperience: req.body.yearsOfExperience,
-    shortBio: req.body.shortBio,
-    categories: req.body.categories,
-    serviceTypes: req.body.serviceTypes,
-  };
-
-  if (req.file) {
-    profileData.profileImage = getFileUrl(req, req.file.filename);
-  } else if (!profileData.fullName) {
-    return sendError(res, 400, 'Profile image or full name is required.');
-  }
-
-  const profile = await TrainerProfile.create(profileData);
-  profile.profileCompletionPercent = profile.calculateCompletion();
-  await profile.save();
-
-  return sendSuccess(res, 201, 'Trainer profile created successfully.', { profile });
 });
 
 /**
  * GET /api/trainers/:id
  */
 const getTrainerById = asyncWrapper(async (req, res) => {
-  console.log(req.params.id, "req.params.id")
-  const profile = await TrainerProfile.find({ user: req.params.id }).populate('user', 'fullName phoneNumber profileImage role');
+  const profile = await TrainerProfile.findOne({ user: req.params.id }).populate('user', 'fullName phoneNumber profileImage role');
   if (!profile) {
     return sendError(res, 404, 'Trainer profile not found.');
   }
@@ -54,27 +155,86 @@ const getTrainerById = asyncWrapper(async (req, res) => {
  * Update trainer profile by user ID
  */
 const updateTrainerProfile = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findOne({ user: req.params.id });
-  if (!profile) {
-    return sendError(res, 404, 'Trainer profile not found.');
+  try {
+    const profile = await TrainerProfile.findOne({ user: req.user.id });
+    if (!profile) {
+      return sendError(res, 404, 'Trainer profile not found.');
+    }
+    if (profile.user.toString() !== req.user._id.toString()) {
+      return sendError(res, 403, 'You are not authorized to update this profile.');
+    }
+
+    const allowedFields = ['fullName', 'yearsOfExperience', 'shortBio', 'categories', 'serviceTypes', 'serviceAreas', 'certifications', 'galleryImages'];
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        if (field === 'categories' || field === 'serviceTypes') {
+          let parsed = parseJSONField(req.body[field]);
+          parsed = ensureArray(parsed);
+          profile[field] = parsed;
+        } else if (field === 'serviceAreas') {
+          let parsed = parseJSONField(req.body[field]);
+          parsed = ensureArray(parsed).map(area => ({
+            ...area,
+            location: {
+              type: 'Point',
+              coordinates: [parseFloat(area.lng) || 0, parseFloat(area.lat) || 0]
+            }
+          }));
+          profile[field] = parsed;
+        } else if (field === 'certifications') {
+          let parsed = parseJSONField(req.body[field]);
+          parsed = ensureArray(parsed).map(cert => {
+            const nameFromUrl = cert.fileUrl ? cert.fileUrl.split('/').pop().replace(/\.[^/.]+$/, '') : 'Untitled';
+            return {
+              name: cert.name || nameFromUrl,
+              fileUrl: cert.fileUrl || null,
+              uploadedAt: cert.uploadedAt || new Date(),
+            };
+          });
+          profile[field] = parsed;
+        } else if (field === 'galleryImages') {
+          let parsed = parseJSONField(req.body[field]);
+          parsed = ensureArray(parsed);
+          profile[field] = parsed;
+        } else {
+          profile[field] = req.body[field];
+        }
+      }
+    });
+
+    // Handle directly uploaded files from uploadAny()
+    if (req.files && Array.isArray(req.files)) {
+      const profileImages = req.files.filter(f => f.fieldname.toLowerCase().includes('profile'));
+      const certFiles = req.files.filter(f => f.fieldname.toLowerCase().includes('cert'));
+      const galleryFiles = req.files.filter(f => f.fieldname.toLowerCase().includes('gallery'));
+
+      if (profileImages.length > 0) {
+        profile.profileImage = getFileUrl(req, profileImages[0].filename);
+      }
+      if (certFiles.length > 0) {
+        const uploadedCerts = certFiles.map((file) => ({
+          name: file.originalname.replace(/\.[^/.]+$/, ''), // strip extension
+          fileUrl: getFileUrl(req, file.filename),
+          uploadedAt: new Date(),
+        }));
+        profile.certifications = profile.certifications.concat(uploadedCerts);
+      }
+      if (galleryFiles.length > 0) {
+        const uploadedGallery = galleryFiles.map((file) => getFileUrl(req, file.filename));
+        profile.galleryImages = profile.galleryImages.concat(uploadedGallery);
+      }
+    } else if (req.file) {
+      profile.profileImage = getFileUrl(req, req.file.filename);
+    }
+
+    profile.profileCompletionPercent = profile.calculateCompletion();
+    await profile.save();
+
+    return sendSuccess(res, 200, 'Trainer profile updated successfully.', { profile });
+  } catch (error) {
+    console.log(error, "error")
+    return sendError(res, 400, 'Trainer profile not updated.');
   }
-  if (profile.user.toString() !== req.user._id.toString()) {
-    return sendError(res, 403, 'You are not authorized to update this profile.');
-  }
-
-  const allowedFields = ['fullName', 'yearsOfExperience', 'shortBio', 'categories', 'serviceTypes'];
-  allowedFields.forEach((field) => {
-    if (req.body[field] !== undefined) profile[field] = req.body[field];
-  });
-
-  if (req.file) {
-    profile.profileImage = getFileUrl(req, req.file.filename);
-  }
-
-  profile.profileCompletionPercent = profile.calculateCompletion();
-  await profile.save();
-
-  return sendSuccess(res, 200, 'Trainer profile updated successfully.', { profile });
 });
 
 /**
@@ -109,6 +269,7 @@ const listTrainers = asyncWrapper(async (req, res) => {
     page = 1,
     limit = 10,
   } = req.query;
+  console.log(req.query)
 
   const pageNum = Math.max(1, parseInt(page, 10));
   const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10)));
@@ -199,13 +360,11 @@ const addCertification = asyncWrapper(async (req, res) => {
   }
 
   const { name } = req.body;
-  if (!name) return sendError(res, 400, 'Certification name is required.');
   if (!req.file) return sendError(res, 400, 'Certification file is required.');
 
-  const certification = { name, uploadedAt: new Date() };
-  if (req.file) {
-    certification.fileUrl = getFileUrl(req, req.file.filename);
-  }
+  const certName = name || req.file.originalname.replace(/\.[^/.]+$/, ''); // strip extension
+  const certification = { name: certName, uploadedAt: new Date() };
+  certification.fileUrl = getFileUrl(req, req.file.filename);
 
   profile.certifications.push(certification);
   profile.profileCompletionPercent = profile.calculateCompletion();
@@ -387,10 +546,10 @@ const deleteGalleryImage = asyncWrapper(async (req, res) => {
  */
 const getTrainerDashboard = asyncWrapper(async (req, res) => {
   const Service = require('../models/Service');
-  
+
   const profile = await TrainerProfile.findOne({ user: req.params.id })
     .populate('user', 'fullName phoneNumber profileImage');
-  
+
   if (!profile) return sendError(res, 404, 'Trainer profile not found.');
 
   // Count services offered by this trainer
@@ -402,7 +561,7 @@ const getTrainerDashboard = asyncWrapper(async (req, res) => {
       completionPercent: profile.profileCompletionPercent,
       isComplete: profile.profileCompletionPercent === 100,
     },
-    
+
     // Basic Info
     trainerInfo: {
       name: profile.fullName || profile.user.fullName,
@@ -411,7 +570,7 @@ const getTrainerDashboard = asyncWrapper(async (req, res) => {
       specialties: profile.categories || [],
       bio: profile.shortBio || '',
     },
-    
+
     // Counts
     stats: {
       serviceAreasCount: profile.serviceAreas.length,
@@ -419,7 +578,7 @@ const getTrainerDashboard = asyncWrapper(async (req, res) => {
       certificationsCount: profile.certifications.length,
       galleryImagesCount: profile.galleryImages.length,
     },
-    
+
     // Service Types
     serviceTypes: profile.serviceTypes.map((service) => ({
       value: service.value,
@@ -428,7 +587,7 @@ const getTrainerDashboard = asyncWrapper(async (req, res) => {
       duration: service.duration || 60,
       count: 0, // Can be populated if you track bookings
     })),
-    
+
     // Service Areas / Venue Locations
     venueLocations: profile.serviceAreas.map((area) => ({
       id: area._id,
@@ -442,10 +601,10 @@ const getTrainerDashboard = asyncWrapper(async (req, res) => {
         lng: area.location.coordinates[0],
       },
     })),
-    
+
     // Gallery Images
     gallery: profile.galleryImages || [],
-    
+
     // Certifications
     certifications: profile.certifications.map((cert) => ({
       id: cert._id,
