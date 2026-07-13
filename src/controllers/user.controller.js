@@ -24,7 +24,6 @@ const updateUser = asyncWrapper(async (req, res) => {
   if (req.user._id.toString() !== req.params.id) {
     return sendError(res, 403, 'You are not authorized to update this user.');
   }
-
   const updates = {};
   if (req.body.fullName) updates.fullName = req.body.fullName;
 
@@ -32,16 +31,13 @@ const updateUser = asyncWrapper(async (req, res) => {
   if (req.file) {
     updates.profileImage = getFileUrl(req, req.file.filename);
   }
-
   const user = await User.findByIdAndUpdate(req.params.id, updates, {
     new: true,
     runValidators: true,
   }).select('-__v');
-
   if (!user) {
     return sendError(res, 404, 'User not found.');
   }
-
   return sendSuccess(res, 200, 'User updated successfully.', { user });
 });
 
@@ -50,21 +46,27 @@ const updateUser = asyncWrapper(async (req, res) => {
  * Soft delete — sets isActive to false.
  */
 const deleteUser = asyncWrapper(async (req, res) => {
-  if (req.user._id.toString() !== req.params.id) {
-    return sendError(res, 403, 'You are not authorized to delete this user.');
+  try {
+    if (req.user._id.toString() !== req.params.id) {
+      return sendError(res, 403, 'You are not authorized to delete this user.');
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { isActive: false },
+      { new: true }
+    );
+
+    if (!user) {
+      return sendError(res, 404, 'User not found.');
+    }
+
+    return sendSuccess(res, 200, 'User account deactivated successfully.', {});
   }
-
-  const user = await User.findByIdAndUpdate(
-    req.params.id,
-    { isActive: false },
-    { new: true }
-  );
-
-  if (!user) {
-    return sendError(res, 404, 'User not found.');
+  catch (err) {
+    console.error(error)
+    return sendError(res, 500, 'Internal server error.');
   }
-
-  return sendSuccess(res, 200, 'User account deactivated successfully.', {});
 });
 
 /**
