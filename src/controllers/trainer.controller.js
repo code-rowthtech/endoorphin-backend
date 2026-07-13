@@ -122,7 +122,7 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
       // Fallback if somehow using uploadSingle
       profileData.profileImage = getFileUrl(req, req.file.filename);
     }
-    
+
     if (!profileData.profileImage && !profileData.fullName) {
       return sendError(res, 400, 'Profile image or full name is required.');
     }
@@ -269,8 +269,6 @@ const listTrainers = asyncWrapper(async (req, res) => {
     page = 1,
     limit = 10,
   } = req.query;
-  console.log(req.query)
-
   const pageNum = Math.max(1, parseInt(page, 10));
   const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10)));
   const skip = (pageNum - 1) * limitNum;

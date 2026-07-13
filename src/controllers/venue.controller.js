@@ -299,7 +299,6 @@ const deleteVenue = asyncWrapper(async (req, res) => {
  * List/search venues with filters
  */
 const listVenues = asyncWrapper(async (req, res) => {
-  console.log('checkinggg')
   const {
     search,
     category,
