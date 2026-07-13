@@ -8,7 +8,6 @@ const validate = require('../middlewares/validate.middleware');
 // POST /api/venues/:venueId/amenities
 router.post(
   '/',
-  protect,
   [
     param('venueId').isMongoId().withMessage('Invalid venue ID.'),
     body('name').notEmpty().withMessage('Amenity name is required.'),

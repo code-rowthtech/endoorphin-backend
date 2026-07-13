@@ -41,9 +41,14 @@ const addStaff = asyncWrapper(async (req, res) => {
 
   const staff = await Staff.create(staffData);
 
-  await VenueProfile.findByIdAndUpdate(venueId, {
+  const updatedVenue = await VenueProfile.findByIdAndUpdate(venueId, {
     $push: { staff: staff._id },
-  });
+  }, { new: true });
+  
+  if (updatedVenue) {
+    updatedVenue.profileCompletionPercent = updatedVenue.calculateCompletion();
+    await updatedVenue.save();
+  }
 
   return sendSuccess(res, 201, 'Staff member added successfully.', { staff });
 });
@@ -99,9 +104,14 @@ const deleteStaff = asyncWrapper(async (req, res) => {
     return sendError(res, 403, 'Unauthorized.');
   }
 
-  await VenueProfile.findByIdAndUpdate(staffMember.venue, {
+  const updatedVenue = await VenueProfile.findByIdAndUpdate(staffMember.venue, {
     $pull: { staff: staffMember._id },
-  });
+  }, { new: true });
+
+  if (updatedVenue) {
+    updatedVenue.profileCompletionPercent = updatedVenue.calculateCompletion();
+    await updatedVenue.save();
+  }
 
   await staffMember.deleteOne();
   return sendSuccess(res, 200, 'Staff member deleted successfully.', {});

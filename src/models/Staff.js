@@ -15,7 +15,7 @@ const staffSchema = new mongoose.Schema(
     role: {
       type: String,
       enum: {
-        values: ['trainer', 'Coach', 'Manager'],
+        values: ['trainer', 'coach', 'manager'],
         message: 'Role must be one of: Trainer, Coach, Manager',
       },
     },

@@ -11,7 +11,7 @@ router.get('/', listServices);
 // POST /api/services
 router.post(
   '/',
-  protect,
+  // protect,
   [body('name').notEmpty().withMessage('Service name is required.')],
   validate,
   createService
