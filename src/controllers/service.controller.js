@@ -7,26 +7,20 @@ const asyncWrapper = require('../utils/asyncWrapper');
  * POST /api/services
  */
 const createService = asyncWrapper(async (req, res) => {
-  const { name, description, venueId, trainerId, isCustom } = req.body;
+  const { name, description } = req.body;
 
   if (!name) return sendError(res, 400, 'Service name is required.');
 
+  // Create as a global service (no venue or trainer)
   const service = await Service.create({
     name,
     description,
-    venue: venueId || null,
-    trainer: trainerId || null,
-    isCustom: isCustom || false,
+    venue: null,
+    trainer: null,
+    isCustom: false,
   });
 
-  // Link to venue if provided
-  if (venueId) {
-    await VenueProfile.findByIdAndUpdate(venueId, {
-      $addToSet: { services: service._id },
-    });
-  }
-
-  return sendSuccess(res, 201, 'Service created successfully.', { service });
+  return sendSuccess(res, 201, 'Global service created successfully.', { service });
 });
 
 /**
@@ -35,8 +29,15 @@ const createService = asyncWrapper(async (req, res) => {
 const listServices = asyncWrapper(async (req, res) => {
   const { venueId, trainerId } = req.query;
   const query = {};
-  if (venueId) query.venue = venueId;
-  if (trainerId) query.trainer = trainerId;
+  if (venueId) {
+    query.venue = venueId;
+  } else if (trainerId) {
+    query.trainer = trainerId;
+  } else {
+    // If no specific venue or trainer is requested, fetch ONLY global services
+    query.venue = null;
+    query.trainer = null;
+  }
 
   const services = await Service.find(query).lean();
   return sendSuccess(res, 200, 'Services fetched successfully.', { services });

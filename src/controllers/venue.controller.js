@@ -50,6 +50,8 @@ const createVenue = asyncWrapper(async (req, res) => {
     amenityNames,
     services,       // flutter fallback
     amenities,      // flutter fallback
+    phone,          // flutter fallback
+    about,          // flutter fallback
   } = req.body;
 
   if (!companyName) {
@@ -77,9 +79,9 @@ const createVenue = asyncWrapper(async (req, res) => {
   const venueData = {
     owner: req.user._id,
     companyName,
-    phoneNumber,
+    phoneNumber: phoneNumber || phone,
     email,
-    aboutVenue,
+    aboutVenue: aboutVenue || about,
     address: {
       streetAddress: streetAddress || address,
       area,
@@ -113,37 +115,97 @@ const createVenue = asyncWrapper(async (req, res) => {
 
   // Create services if provided
   if (finalServiceNames && finalServiceNames.length > 0) {
-    const servicesDocs = await Service.insertMany(
-      finalServiceNames.map((item) => {
-        if (typeof item === 'object' && item !== null) {
-          return { ...item, venue: venue._id };
+    const existingServiceIds = [];
+    const customServiceItems = [];
+
+    for (const item of finalServiceNames) {
+      if (typeof item === 'string' && mongoose.Types.ObjectId.isValid(item)) {
+        existingServiceIds.push(new mongoose.Types.ObjectId(item));
+      } else if (typeof item === 'object' && item !== null && mongoose.Types.ObjectId.isValid(item._id || item.id)) {
+        existingServiceIds.push(new mongoose.Types.ObjectId(item._id || item.id));
+      } else {
+        const itemName = typeof item === 'string' ? item : item?.name;
+        if (itemName) {
+          const existing = await Service.findOne({ 
+            name: { $regex: new RegExp(`^${itemName}$`, 'i') }, 
+            isCustom: false 
+          });
+          if (existing) {
+            existingServiceIds.push(existing._id);
+          } else {
+            customServiceItems.push(item);
+          }
         }
-        return { name: item, venue: venue._id };
-      })
-    );
-    venue.services = servicesDocs.map((s) => s._id);
+      }
+    }
+
+    let newCustomServiceIds = [];
+    if (customServiceItems.length > 0) {
+      const created = await Service.insertMany(
+        customServiceItems.map((item) => {
+          if (typeof item === 'object' && item !== null) {
+            return { ...item, venue: venue._id, isCustom: true };
+          }
+          return { name: item, venue: venue._id, isCustom: true };
+        })
+      );
+      newCustomServiceIds = created.map((s) => s._id);
+    }
+
+    venue.services = [...existingServiceIds, ...newCustomServiceIds];
   }
 
   // Create amenities if provided
   if (finalAmenityNames && finalAmenityNames.length > 0) {
-    const amenitiesDocs = await Amenity.insertMany(
-      finalAmenityNames.map((item) => {
-        if (typeof item === 'object' && item !== null) {
-          return { ...item, venue: venue._id };
+    const existingIds = [];
+    const customItems = [];
+
+    for (const item of finalAmenityNames) {
+      if (typeof item === 'string' && mongoose.Types.ObjectId.isValid(item)) {
+        existingIds.push(new mongoose.Types.ObjectId(item));
+      } else if (typeof item === 'object' && item !== null && mongoose.Types.ObjectId.isValid(item._id || item.id)) {
+        existingIds.push(new mongoose.Types.ObjectId(item._id || item.id));
+      } else {
+        const itemName = typeof item === 'string' ? item : item?.name;
+        if (itemName) {
+          const existing = await Amenity.findOne({ 
+            name: { $regex: new RegExp(`^${itemName}$`, 'i') }, 
+            isCustom: false 
+          });
+          if (existing) {
+            existingIds.push(existing._id);
+          } else {
+            customItems.push(item);
+          }
         }
-        return { name: item, venue: venue._id };
-      })
-    );
-    venue.amenities = amenitiesDocs.map((a) => a._id);
+      }
+    }
+
+    let newCustomIds = [];
+    if (customItems.length > 0) {
+      const created = await Amenity.insertMany(
+        customItems.map((item) => {
+          if (typeof item === 'object' && item !== null) {
+            return { ...item, venue: venue._id, isCustom: true };
+          }
+          return { name: item, venue: venue._id, isCustom: true };
+        })
+      );
+      newCustomIds = created.map((a) => a._id);
+    }
+
+    venue.amenities = [...existingIds, ...newCustomIds];
   }
 
   venue.profileCompletionPercent = venue.calculateCompletion();
   await venue.save();
 
   // Update user's email and phoneNumber if provided
-  if (phoneNumber || email) {
+  // Update user's email and phoneNumber if provided
+  const finalPhone = phoneNumber || phone;
+  if (finalPhone || email) {
     const userUpdate = {};
-    if (phoneNumber) userUpdate.phoneNumber = phoneNumber;
+    if (finalPhone) userUpdate.phoneNumber = finalPhone;
     if (email) userUpdate.email = email;
     await User.findByIdAndUpdate(req.user._id, userUpdate);
   }
@@ -169,7 +231,8 @@ const getVenueById = asyncWrapper(async (req, res) => {
     .populate('owner', 'fullName phoneNumber profileImage')
     .populate('services')
     .populate('amenities')
-    .populate('staff');
+    .populate('staff')
+    .lean();
 
   if (!venue) return sendError(res, 404, 'Venue not found.');
 
@@ -188,13 +251,46 @@ const getVenueById = asyncWrapper(async (req, res) => {
     }
   }
 
-  return sendSuccess(res, 200, 'Venue fetched successfully.', { venue, isFavorite, favoriteId });
+  // Amenities
+  const globalAmenities = await Amenity.find({ venue: null }).lean();
+  const populatedAmenities = venue.amenities || [];
+  const storedAmenityIds = new Set(populatedAmenities.map((a) => (a._id ? a._id.toString() : a.toString())));
+  
+  const globalAmenitiesWithFlag = globalAmenities.map((amenity) => ({
+    ...amenity,
+    isStored: storedAmenityIds.has(amenity._id.toString()),
+  }));
+  const customAmenities = populatedAmenities
+    .filter((a) => a.isCustom)
+    .map((a) => ({ ...(a._doc || a), isStored: true }));
+
+  // Services
+  const globalServices = await Service.find({ venue: null, trainer: null }).lean();
+  const populatedServices = venue.services || [];
+  const storedServiceIds = new Set(populatedServices.map((s) => (s._id ? s._id.toString() : s.toString())));
+
+  const globalServicesWithFlag = globalServices.map((service) => ({
+    ...service,
+    isStored: storedServiceIds.has(service._id.toString()),
+  }));
+  const customServices = populatedServices
+    .filter((s) => s.isCustom)
+    .map((s) => ({ ...(s._doc || s), isStored: true }));
+
+  const mappedVenue = {
+    ...venue,
+    amenities: [...globalAmenitiesWithFlag, ...customAmenities],
+    services: [...globalServicesWithFlag, ...customServices],
+  };
+
+  return sendSuccess(res, 200, 'Venue fetched successfully.', { venue: mappedVenue, isFavorite, favoriteId });
 });
 
 /**
  * PUT /api/venues/:id
  */
 const updateVenue = asyncWrapper(async (req, res) => {
+  console.log(req.body)
   try {
     const venue = await VenueProfile.findById(req.params.id);
     if (!venue) return sendError(res, 404, 'Venue not found.');
@@ -202,10 +298,16 @@ const updateVenue = asyncWrapper(async (req, res) => {
       return sendError(res, 403, 'Unauthorized.');
     }
 
-    const allowedFields = ['companyName', 'phoneNumber', 'email', 'aboutVenue'];
+    const allowedFields = ['companyName', 'email', 'aboutVenue'];
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) venue[field] = req.body[field];
     });
+
+    // Accept frontend aliases
+    if (req.body.phoneNumber !== undefined) venue.phoneNumber = req.body.phoneNumber;
+    else if (req.body.phone !== undefined) venue.phoneNumber = req.body.phone;
+
+    if (req.body.about !== undefined && req.body.aboutVenue === undefined) venue.aboutVenue = req.body.about;
 
     // Update address
     if (req.body.streetAddress || req.body.address || req.body.area || req.body.city || req.body.state || req.body.pincode) {
@@ -245,50 +347,124 @@ const updateVenue = asyncWrapper(async (req, res) => {
 
     // Update Services
     if (req.body.serviceNames !== undefined || req.body.services !== undefined) {
-      await Service.deleteMany({ venue: venue._id });
-      let finalServiceNames = ensureArray(parseJSONField(req.body.serviceNames || req.body.services));
-      if (finalServiceNames && finalServiceNames.length > 0) {
-        const servicesDocs = await Service.insertMany(
-          finalServiceNames.map((item) => {
-            if (typeof item === 'object' && item !== null) {
-              return { ...item, venue: venue._id };
+      let finalServiceNames = ensureArray(parseJSONField(req.body.serviceNames || req.body.services)) || [];
+      
+      const existingServiceIds = [];
+      const customServiceItems = [];
+
+      for (const item of finalServiceNames) {
+        if (typeof item === 'string' && mongoose.Types.ObjectId.isValid(item)) {
+          existingServiceIds.push(new mongoose.Types.ObjectId(item));
+        } else if (typeof item === 'object' && item !== null && mongoose.Types.ObjectId.isValid(item._id || item.id)) {
+          existingServiceIds.push(new mongoose.Types.ObjectId(item._id || item.id));
+        } else {
+          const itemName = typeof item === 'string' ? item : item?.name;
+          if (itemName) {
+            const existing = await Service.findOne({ 
+              name: { $regex: new RegExp(`^${itemName}$`, 'i') }, 
+              isCustom: false 
+            });
+            if (existing) {
+              existingServiceIds.push(existing._id);
+            } else {
+              customServiceItems.push(item);
             }
-            return { name: item, venue: venue._id };
+          }
+        }
+      }
+
+      // Delete old custom services for this venue that are no longer selected
+      await Service.deleteMany({ venue: venue._id, isCustom: true });
+
+      // Create new custom services
+      let newCustomServiceIds = [];
+      if (customServiceItems.length > 0) {
+        const created = await Service.insertMany(
+          customServiceItems.map((item) => {
+            if (typeof item === 'object' && item !== null) {
+              return { ...item, venue: venue._id, isCustom: true };
+            }
+            return { name: item, venue: venue._id, isCustom: true };
           })
         );
-        venue.services = servicesDocs.map((s) => s._id);
-      } else {
-        venue.services = [];
+        newCustomServiceIds = created.map((s) => s._id);
       }
+
+      venue.services = [...existingServiceIds, ...newCustomServiceIds];
     }
 
     // Update Amenities
+    // Each item can be:
+    //   - A valid MongoId string  → existing admin amenity, just link it (no new doc)
+    //   - A name string           → custom amenity, create with isCustom:true
+    //   - An object { name, icon }→ custom amenity, create with isCustom:true
     if (req.body.amenityNames !== undefined || req.body.amenities !== undefined) {
-      await Amenity.deleteMany({ venue: venue._id });
-      let finalAmenityNames = ensureArray(parseJSONField(req.body.amenityNames || req.body.amenities));
-      if (finalAmenityNames && finalAmenityNames.length > 0) {
-        const amenitiesDocs = await Amenity.insertMany(
-          finalAmenityNames.map((item) => {
-            if (typeof item === 'object' && item !== null) {
-              return { ...item, venue: venue._id };
+      let incoming = ensureArray(parseJSONField(req.body.amenityNames || req.body.amenities)) || [];
+
+      const existingIds = [];   // admin amenities selected by ID
+      const customItems = [];   // new custom amenities to create
+
+      for (const item of incoming) {
+        // Case 1: plain string that is a valid ObjectId → link existing amenity
+        if (typeof item === 'string' && mongoose.Types.ObjectId.isValid(item)) {
+          existingIds.push(new mongoose.Types.ObjectId(item));
+
+          // Case 2: object with a valid _id → link existing amenity
+        } else if (typeof item === 'object' && item !== null && mongoose.Types.ObjectId.isValid(item._id || item.id)) {
+          existingIds.push(new mongoose.Types.ObjectId(item._id || item.id));
+
+          // Case 3: object or name string without a valid ID
+        } else {
+          const itemName = typeof item === 'string' ? item : item?.name;
+
+          // Check if a global/admin amenity with this name already exists
+          if (itemName) {
+            const existing = await Amenity.findOne({ 
+              name: { $regex: new RegExp(`^${itemName}$`, 'i') }, 
+              isCustom: false 
+            });
+            if (existing) {
+              // Found a matching admin amenity — link it, don't create duplicate
+              existingIds.push(existing._id);
+            } else {
+              // Truly new custom amenity
+              customItems.push(item);
             }
-            return { name: item, venue: venue._id };
+          }
+        }
+      }
+
+      // Delete old custom amenities for this venue that are no longer selected
+      await Amenity.deleteMany({ venue: venue._id, isCustom: true });
+
+      // Create new custom amenities
+      let newCustomIds = [];
+      if (customItems.length > 0) {
+        const created = await Amenity.insertMany(
+          customItems.map((item) => {
+            if (typeof item === 'object' && item !== null) {
+              return { ...item, venue: venue._id, isCustom: true };
+            }
+            return { name: item, venue: venue._id, isCustom: true };
           })
         );
-        venue.amenities = amenitiesDocs.map((a) => a._id);
-      } else {
-        venue.amenities = [];
+        newCustomIds = created.map((a) => a._id);
       }
+
+      // Final amenity list = existing admin IDs + newly created custom IDs
+      venue.amenities = [...existingIds, ...newCustomIds];
     }
 
     venue.profileCompletionPercent = venue.calculateCompletion();
     await venue.save();
 
-    // Update user's email and phoneNumber if provided
-    if (req.body.phone || req.body.email) {
+    // Sync email and phoneNumber to User model as well
+    const syncPhone = req.body.phoneNumber || req.body.phone;
+    const syncEmail = req.body.email;
+    if (syncPhone || syncEmail) {
       const userUpdate = {};
-      if (req.body.phone) userUpdate.phoneNumber = req.body.phone;
-      if (req.body.email) userUpdate.email = req.body.email;
+      if (syncPhone) userUpdate.phoneNumber = syncPhone;
+      if (syncEmail) userUpdate.email = syncEmail;
       await User.findByIdAndUpdate(req.user._id, userUpdate);
     }
 
@@ -388,8 +564,45 @@ const listVenues = asyncWrapper(async (req, res) => {
       { path: 'amenities' }
     ]);
 
+    const globalAmenities = await Amenity.find({ venue: null }).lean();
+    const globalServices = await Service.find({ venue: null, trainer: null }).lean();
+
+    const mappedVenues = venues.map((venue) => {
+      // Amenities
+      const populatedAmenities = venue.amenities || [];
+      const storedAmenityIds = new Set(
+        populatedAmenities.map((a) => (a._id ? a._id.toString() : a.toString()))
+      );
+      const globalAmenitiesWithFlag = globalAmenities.map((amenity) => ({
+        ...amenity,
+        isStored: storedAmenityIds.has(amenity._id.toString()),
+      }));
+      const customAmenities = populatedAmenities
+        .filter((a) => a.isCustom)
+        .map((a) => ({ ...(a._doc || a), isStored: true }));
+
+      // Services
+      const populatedServices = venue.services || [];
+      const storedServiceIds = new Set(
+        populatedServices.map((s) => (s._id ? s._id.toString() : s.toString()))
+      );
+      const globalServicesWithFlag = globalServices.map((service) => ({
+        ...service,
+        isStored: storedServiceIds.has(service._id.toString()),
+      }));
+      const customServices = populatedServices
+        .filter((s) => s.isCustom)
+        .map((s) => ({ ...(s._doc || s), isStored: true }));
+
+      return {
+        ...venue,
+        amenities: [...globalAmenitiesWithFlag, ...customAmenities],
+        services: [...globalServicesWithFlag, ...customServices],
+      };
+    });
+
     return sendSuccess(res, 200, 'Venues fetched successfully.', {
-      venues,
+      venues: mappedVenues,
       pagination: { page: pageNum, limit: limitNum, total: venues.length },
     });
   }
@@ -414,8 +627,45 @@ const listVenues = asyncWrapper(async (req, res) => {
     .limit(limitNum)
     .lean();
 
+  const globalAmenities = await Amenity.find({ venue: null }).lean();
+  const globalServices = await Service.find({ venue: null, trainer: null }).lean();
+
+  const mappedVenues = venues.map((venue) => {
+    // Amenities
+    const populatedAmenities = venue.amenities || [];
+    const storedAmenityIds = new Set(
+      populatedAmenities.map((a) => (a._id ? a._id.toString() : a.toString()))
+    );
+    const globalAmenitiesWithFlag = globalAmenities.map((amenity) => ({
+      ...amenity,
+      isStored: storedAmenityIds.has(amenity._id.toString()),
+    }));
+    const customAmenities = populatedAmenities
+      .filter((a) => a.isCustom)
+      .map((a) => ({ ...(a._doc || a), isStored: true }));
+
+    // Services
+    const populatedServices = venue.services || [];
+    const storedServiceIds = new Set(
+      populatedServices.map((s) => (s._id ? s._id.toString() : s.toString()))
+    );
+    const globalServicesWithFlag = globalServices.map((service) => ({
+      ...service,
+      isStored: storedServiceIds.has(service._id.toString()),
+    }));
+    const customServices = populatedServices
+      .filter((s) => s.isCustom)
+      .map((s) => ({ ...(s._doc || s), isStored: true }));
+
+    return {
+      ...venue,
+      amenities: [...globalAmenitiesWithFlag, ...customAmenities],
+      services: [...globalServicesWithFlag, ...customServices],
+    };
+  });
+
   return sendSuccess(res, 200, 'Venues fetched successfully.', {
-    venues,
+    venues: mappedVenues,
     pagination: { page: pageNum, limit: limitNum, total },
   });
 });

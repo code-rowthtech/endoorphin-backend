@@ -4,7 +4,6 @@ const categorySchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, 'Category name is required'],
-    unique: true,
     trim: true,
   },
   icon: {
@@ -22,6 +21,16 @@ const categorySchema = new mongoose.Schema({
   isCustom: {
     type: Boolean,
     default: false,
+  },
+  trainer: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'TrainerProfile',
+    default: null,
+  },
+  venue: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'VenueProfile',
+    default: null,
   },
 });
 

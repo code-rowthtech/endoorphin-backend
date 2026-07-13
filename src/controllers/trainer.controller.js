@@ -1,4 +1,7 @@
 const TrainerProfile = require('../models/TrainerProfile');
+const Category = require('../models/Category');
+const ServiceType = require('../models/ServiceType');
+const mongoose = require('mongoose');
 const { sendSuccess, sendError } = require('../utils/apiResponse');
 const asyncWrapper = require('../utils/asyncWrapper');
 const { getFileUrl } = require('../middlewares/upload.middleware');
@@ -86,8 +89,6 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
       fullName: req.body.fullName || req.user.fullName,
       yearsOfExperience: req.body.yearsOfExperience,
       shortBio: req.body.shortBio,
-      categories: parsedCategories,
-      serviceTypes: parsedServiceTypes,
     };
     if (parsedServiceAreas) profileData.serviceAreas = parsedServiceAreas;
     if (parsedCertifications) profileData.certifications = parsedCertifications;
@@ -128,6 +129,70 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
     }
 
     const profile = await TrainerProfile.create(profileData);
+
+    // Map Categories
+    if (parsedCategories && parsedCategories.length > 0) {
+      const existingCatIds = [];
+      const customCatNames = [];
+      for (const cat of parsedCategories) {
+        if (typeof cat === 'string' && mongoose.Types.ObjectId.isValid(cat)) {
+          existingCatIds.push(new mongoose.Types.ObjectId(cat));
+        } else if (typeof cat === 'object' && cat !== null && mongoose.Types.ObjectId.isValid(cat._id || cat.id)) {
+          existingCatIds.push(new mongoose.Types.ObjectId(cat._id || cat.id));
+        } else {
+          const catName = typeof cat === 'string' ? cat : cat?.name;
+          if (catName) {
+            const existing = await Category.findOne({ name: { $regex: new RegExp(`^${catName}$`, 'i') }, isCustom: false, type: 'trainer' });
+            if (existing) {
+              existingCatIds.push(existing._id);
+            } else {
+              customCatNames.push(catName);
+            }
+          }
+        }
+      }
+      let newCatIds = [];
+      if (customCatNames.length > 0) {
+        const created = await Category.insertMany(
+          customCatNames.map((name) => ({ name, type: 'trainer', trainer: profile._id, isCustom: true }))
+        );
+        newCatIds = created.map(c => c._id);
+      }
+      profile.categories = [...existingCatIds, ...newCatIds];
+    }
+
+    // Map ServiceTypes
+    if (parsedServiceTypes && parsedServiceTypes.length > 0) {
+      const existingStIds = [];
+      const customStData = [];
+      for (const st of parsedServiceTypes) {
+        if (typeof st === 'string' && mongoose.Types.ObjectId.isValid(st)) {
+          existingStIds.push(new mongoose.Types.ObjectId(st));
+        } else if (typeof st === 'object' && st !== null && mongoose.Types.ObjectId.isValid(st._id || st.id || st.serviceType)) {
+          existingStIds.push(new mongoose.Types.ObjectId(st._id || st.id || st.serviceType));
+        } else {
+          const stValue = typeof st === 'string' ? st : (st?.value || st?.name || st?.serviceType);
+          if (stValue) {
+            const existing = await ServiceType.findOne({ name: { $regex: new RegExp(`^${stValue}$`, 'i') }, isCustom: false });
+            if (existing) {
+              existingStIds.push(existing._id);
+            } else {
+              const stDesc = typeof st === 'object' && st.description ? st.description : null;
+              customStData.push({ name: stValue, description: stDesc });
+            }
+          }
+        }
+      }
+      let newStIds = [];
+      if (customStData.length > 0) {
+        const created = await ServiceType.insertMany(
+          customStData.map((data) => ({ name: data.name, description: data.description, trainer: profile._id, isCustom: true }))
+        );
+        newStIds = created.map(c => c._id);
+      }
+      profile.serviceTypes = [...existingStIds, ...newStIds];
+    }
+
     profile.profileCompletionPercent = profile.calculateCompletion();
     await profile.save();
 
@@ -155,6 +220,7 @@ const getTrainerById = asyncWrapper(async (req, res) => {
  * Update trainer profile by user ID
  */
 const updateTrainerProfile = asyncWrapper(async (req, res) => {
+  console.log(req.body)
   try {
     const profile = await TrainerProfile.findOne({ user: req.user.id });
     if (!profile) {
@@ -167,10 +233,10 @@ const updateTrainerProfile = asyncWrapper(async (req, res) => {
     const allowedFields = ['fullName', 'yearsOfExperience', 'shortBio', 'categories', 'serviceTypes', 'serviceAreas', 'certifications', 'galleryImages'];
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) {
-        if (field === 'categories' || field === 'serviceTypes') {
-          let parsed = parseJSONField(req.body[field]);
-          parsed = ensureArray(parsed);
-          profile[field] = parsed;
+        if (field === 'categories') {
+          // Categories will be handled below to support async operations
+        } else if (field === 'serviceTypes') {
+          // ServiceTypes will be handled below to support async operations
         } else if (field === 'serviceAreas') {
           let parsed = parseJSONField(req.body[field]);
           parsed = ensureArray(parsed).map(area => ({
@@ -201,6 +267,83 @@ const updateTrainerProfile = asyncWrapper(async (req, res) => {
         }
       }
     });
+
+    if (req.body.categories !== undefined) {
+      let parsedCategories = ensureArray(parseJSONField(req.body.categories));
+      const existingCatIds = [];
+      const customCatNames = [];
+      for (const cat of parsedCategories) {
+        if (typeof cat === 'string' && mongoose.Types.ObjectId.isValid(cat)) {
+          existingCatIds.push(new mongoose.Types.ObjectId(cat));
+        } else if (typeof cat === 'object' && cat !== null && mongoose.Types.ObjectId.isValid(cat._id || cat.id)) {
+          existingCatIds.push(new mongoose.Types.ObjectId(cat._id || cat.id));
+        } else {
+          const catName = typeof cat === 'string' ? cat : cat?.name;
+          if (catName) {
+            const existing = await Category.findOne({ name: { $regex: new RegExp(`^${catName}$`, 'i') }, isCustom: false, type: 'trainer' });
+            if (existing) {
+              existingCatIds.push(existing._id);
+            } else {
+              customCatNames.push(catName);
+            }
+          }
+        }
+      }
+      // Cleanup old custom categories for this trainer that are no longer selected
+      await Category.deleteMany({
+        trainer: profile._id,
+        isCustom: true,
+        _id: { $nin: existingCatIds }
+      });
+
+      let newCatIds = [];
+      if (customCatNames.length > 0) {
+        const created = await Category.insertMany(
+          customCatNames.map((name) => ({ name, type: 'trainer', trainer: profile._id, isCustom: true }))
+        );
+        newCatIds = created.map(c => c._id);
+      }
+      profile.categories = [...existingCatIds, ...newCatIds];
+    }
+
+    if (req.body.serviceTypes !== undefined) {
+      let parsedServiceTypes = ensureArray(parseJSONField(req.body.serviceTypes));
+      const existingStIds = [];
+      const customStData = [];
+      for (const st of parsedServiceTypes) {
+        if (typeof st === 'string' && mongoose.Types.ObjectId.isValid(st)) {
+          existingStIds.push(new mongoose.Types.ObjectId(st));
+        } else if (typeof st === 'object' && st !== null && mongoose.Types.ObjectId.isValid(st._id || st.id || st.serviceType)) {
+          existingStIds.push(new mongoose.Types.ObjectId(st._id || st.id || st.serviceType));
+        } else {
+          const stValue = typeof st === 'string' ? st : (st?.value || st?.name || st?.serviceType);
+          if (stValue) {
+            const existing = await ServiceType.findOne({ name: { $regex: new RegExp(`^${stValue}$`, 'i') }, isCustom: false });
+            if (existing) {
+              existingStIds.push(existing._id);
+            } else {
+              const stDesc = typeof st === 'object' && st.description ? st.description : null;
+              customStData.push({ name: stValue, description: stDesc });
+            }
+          }
+        }
+      }
+      // Cleanup old custom serviceTypes for this trainer that are no longer selected
+      await ServiceType.deleteMany({
+        trainer: profile._id,
+        isCustom: true,
+        _id: { $nin: existingStIds }
+      });
+
+      let newStIds = [];
+      if (customStData.length > 0) {
+        const created = await ServiceType.insertMany(
+          customStData.map((data) => ({ name: data.name, description: data.description, trainer: profile._id, isCustom: true }))
+        );
+        newStIds = created.map(c => c._id);
+      }
+      profile.serviceTypes = [...existingStIds, ...newStIds];
+    }
 
     // Handle directly uploaded files from uploadAny()
     if (req.files && Array.isArray(req.files)) {
@@ -273,6 +416,31 @@ const listTrainers = asyncWrapper(async (req, res) => {
   const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10)));
   const skip = (pageNum - 1) * limitNum;
 
+  const matchStage = {};
+
+  if (category) {
+    const cats = await Category.find({ name: { $regex: category, $options: 'i' }, type: 'trainer' }).select('_id');
+    matchStage.categories = { $in: cats.map(c => c._id) };
+  }
+  if (serviceType) {
+    const sts = await ServiceType.find({ name: { $regex: serviceType, $options: 'i' } }).select('_id');
+    matchStage.serviceTypes = { $in: sts.map(s => s._id) };
+  }
+
+  if (search) {
+    const matchedCats = await Category.find({ name: { $regex: search, $options: 'i' }, type: 'trainer' }).select('_id');
+    matchStage.$or = [
+      { fullName: { $regex: search, $options: 'i' } },
+      { shortBio: { $regex: search, $options: 'i' } },
+    ];
+    if (matchedCats.length > 0) {
+      matchStage.$or.push({ categories: { $in: matchedCats.map(c => c._id) } });
+    }
+  }
+
+  let trainers = [];
+  let total = 0;
+
   // If geo params provided, use aggregation pipeline
   if (lat && lng) {
     const pipeline = [];
@@ -287,17 +455,6 @@ const listTrainers = asyncWrapper(async (req, res) => {
         'serviceAreas.location'
       )
     );
-
-    const matchStage = {};
-    if (search) {
-      matchStage.$or = [
-        { fullName: { $regex: search, $options: 'i' } },
-        { shortBio: { $regex: search, $options: 'i' } },
-        { categories: { $regex: search, $options: 'i' } },
-      ];
-    }
-    if (category) matchStage.categories = { $in: [category] };
-    if (serviceType) matchStage.serviceTypes = { $in: [serviceType] };
 
     if (Object.keys(matchStage).length > 0) {
       pipeline.push({ $match: matchStage });
@@ -314,34 +471,62 @@ const listTrainers = asyncWrapper(async (req, res) => {
       { $limit: limitNum }
     );
 
-    const trainers = await TrainerProfile.aggregate(pipeline);
-    return sendSuccess(res, 200, 'Trainers fetched successfully.', {
-      trainers,
-      pagination: { page: pageNum, limit: limitNum, total: trainers.length },
-    });
+    trainers = await TrainerProfile.aggregate(pipeline);
+    trainers = await TrainerProfile.populate(trainers, [
+      { path: 'user', select: 'fullName phoneNumber profileImage' },
+      { path: 'categories' },
+      { path: 'serviceTypes' }
+    ]);
+    // Aggregation total would require a facet, approximating with length for now as before
+    total = trainers.length;
+  } else {
+    // Non-geo search
+    total = await TrainerProfile.countDocuments(matchStage);
+    trainers = await TrainerProfile.find(matchStage)
+      .populate('user', 'fullName phoneNumber profileImage')
+      .populate('categories')
+      .populate('serviceTypes')
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
   }
 
-  // Non-geo search
-  const query = {};
-  if (search) {
-    query.$or = [
-      { fullName: { $regex: search, $options: 'i' } },
-      { shortBio: { $regex: search, $options: 'i' } },
-      { categories: { $regex: search, $options: 'i' } },
-    ];
-  }
-  if (category) query.categories = { $in: [category] };
-  if (serviceType) query.serviceTypes = { $in: [serviceType] };
+  // Map isStored flags
+  const globalCategories = await Category.find({ trainer: null, type: 'trainer' }).lean();
+  const globalServiceTypes = await ServiceType.find({ trainer: null }).lean();
 
-  const total = await TrainerProfile.countDocuments(query);
-  const trainers = await TrainerProfile.find(query)
-    .populate('user', 'fullName phoneNumber profileImage')
-    .skip(skip)
-    .limit(limitNum)
-    .lean();
+  const mappedTrainers = trainers.map((trainer) => {
+    // Categories
+    const populatedCategories = trainer.categories || [];
+    const storedCatIds = new Set(populatedCategories.map(c => c._id ? c._id.toString() : c.toString()));
+    const globalCatsWithFlag = globalCategories.map(c => ({
+      ...c,
+      isStored: storedCatIds.has(c._id.toString()),
+    }));
+    const customCats = populatedCategories
+      .filter(c => c.isCustom)
+      .map(c => ({ ...(c._doc || c), isStored: true }));
+
+    // Service Types
+    const populatedServiceTypes = trainer.serviceTypes || [];
+    const storedStIds = new Set(populatedServiceTypes.map(st => st._id ? st._id.toString() : st.toString()));
+    const globalStsWithFlag = globalServiceTypes.map(st => ({
+      ...st,
+      isStored: storedStIds.has(st._id.toString()),
+    }));
+    const customSts = populatedServiceTypes
+      .filter(st => st.isCustom)
+      .map(st => ({ ...(st._doc || st), isStored: true }));
+
+    return {
+      ...trainer,
+      categories: [...globalCatsWithFlag, ...customCats],
+      serviceTypes: [...globalStsWithFlag, ...customSts],
+    };
+  });
 
   return sendSuccess(res, 200, 'Trainers fetched successfully.', {
-    trainers,
+    trainers: mappedTrainers,
     pagination: { page: pageNum, limit: limitNum, total },
   });
 });
@@ -544,16 +729,74 @@ const deleteGalleryImage = asyncWrapper(async (req, res) => {
  */
 const getTrainerDashboard = asyncWrapper(async (req, res) => {
   const Service = require('../models/Service');
+  const User = require('../models/User');
 
   const profile = await TrainerProfile.findOne({ user: req.params.id })
-    .populate('user', 'fullName phoneNumber profileImage');
+    .populate('user', 'fullName phoneNumber profileImage')
+    .populate('categories')
+    .populate('serviceTypes');
 
-  if (!profile) return sendError(res, 404, 'Trainer profile not found.');
+  if (!profile) {
+    const user = await User.findById(req.params.id);
+    if (!user) return sendError(res, 404, 'User not found.');
+
+    return sendSuccess(res, 200, 'Dashboard data fetched successfully.', {
+      profileExists: false,
+      profileStatus: {
+        completionPercent: 0,
+        isComplete: false,
+      },
+      trainerInfo: {
+        name: user.fullName || '',
+        profileImage: user.profileImage || null,
+        yearsOfExperience: 0,
+        specialties: [],
+        bio: '',
+      },
+      stats: {
+        serviceAreasCount: 0,
+        servicesOfferedCount: 0,
+        certificationsCount: 0,
+        galleryImagesCount: 0,
+      },
+      serviceTypes: [],
+      venueLocations: [],
+      gallery: [],
+      certifications: [],
+    });
+  }
 
   // Count services offered by this trainer
   const servicesCount = await Service.countDocuments({ trainer: profile._id });
 
+  // Map isStored flags
+  const globalCategories = await Category.find({ trainer: null, type: 'trainer' }).lean();
+  const globalServiceTypes = await ServiceType.find({ trainer: null }).lean();
+
+  const populatedCategories = profile.categories || [];
+  const storedCatIds = new Set(populatedCategories.map(c => c._id ? c._id.toString() : c.toString()));
+  const globalCatsWithFlag = globalCategories.map(c => ({
+    ...c,
+    isStored: storedCatIds.has(c._id.toString()),
+  }));
+  const customCats = populatedCategories
+    .filter(c => c.isCustom)
+    .map(c => ({ ...(c._doc || c), isStored: true }));
+  const mappedCategories = [...globalCatsWithFlag, ...customCats];
+
+  const populatedServiceTypes = profile.serviceTypes || [];
+  const storedStIds = new Set(populatedServiceTypes.map(st => st._id ? st._id.toString() : st.toString()));
+  const globalStsWithFlag = globalServiceTypes.map(st => ({
+    ...st,
+    isStored: storedStIds.has(st._id.toString()),
+  }));
+  const customSts = populatedServiceTypes
+    .filter(st => st.isCustom)
+    .map(st => ({ ...(st._doc || st), isStored: true }));
+  const mappedServiceTypes = [...globalStsWithFlag, ...customSts];
+
   return sendSuccess(res, 200, 'Dashboard data fetched successfully.', {
+    profileExists: true,
     // Profile Status
     profileStatus: {
       completionPercent: profile.profileCompletionPercent,
@@ -565,7 +808,7 @@ const getTrainerDashboard = asyncWrapper(async (req, res) => {
       name: profile.fullName || profile.user.fullName,
       profileImage: profile.profileImage || profile.user.profileImage,
       yearsOfExperience: profile.yearsOfExperience || 0,
-      specialties: profile.categories || [],
+      specialties: mappedCategories,
       bio: profile.shortBio || '',
     },
 
@@ -578,11 +821,10 @@ const getTrainerDashboard = asyncWrapper(async (req, res) => {
     },
 
     // Service Types
-    serviceTypes: profile.serviceTypes.map((service) => ({
-      value: service.value,
-      type: service.value, // For backwards compatibility
-      price: service.price || 0,
-      duration: service.duration || 60,
+    serviceTypes: mappedServiceTypes.map((service) => ({
+      ...service,
+      value: service.name, // For backwards compatibility
+      type: service.name, // For backwards compatibility
       count: 0, // Can be populated if you track bookings
     })),
 

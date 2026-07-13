@@ -19,6 +19,8 @@ const {
 const { protect, restrictTo } = require('../middlewares/auth.middleware');
 const validate = require('../middlewares/validate.middleware');
 const { uploadAny, uploadSingle, uploadArray } = require('../middlewares/upload.middleware');
+const { createCustomServiceType } = require('../controllers/serviceType.controller');
+const { createCustomCategory } = require('../controllers/category.controller');
 
 // GET /api/trainers — list/search
 router.get('/', listTrainers);
@@ -130,6 +132,22 @@ router.delete(
   protect,
   restrictTo('trainer'),
   deleteGalleryImage
+);
+
+// POST /api/trainers/:id/service-types
+router.post(
+  '/:id/service-types',
+  protect,
+  restrictTo('trainer'),
+  createCustomServiceType
+);
+
+// POST /api/trainers/:id/categories
+router.post(
+  '/:id/categories',
+  protect,
+  restrictTo('trainer'),
+  createCustomCategory
 );
 
 module.exports = router;

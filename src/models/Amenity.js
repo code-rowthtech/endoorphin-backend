@@ -13,7 +13,7 @@ const amenitySchema = new mongoose.Schema({
   venue: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'VenueProfile',
-    required: [true, 'Venue reference is required'],
+    default: null,
   },
   isCustom: {
     type: Boolean,

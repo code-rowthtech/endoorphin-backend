@@ -51,7 +51,10 @@ const trainerProfileSchema = new mongoose.Schema(
       default: null,
     },
     categories: {
-      type: [String],
+      type: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Category',
+      }],
       default: [],
     },
     certifications: {
@@ -64,15 +67,8 @@ const trainerProfileSchema = new mongoose.Schema(
     },
     serviceTypes: {
       type: [{
-        value: {
-          type: String,
-          // enum: {
-          //   values: ['In-Person', 'Home Visit', 'Gym Facility'],
-          //   message: 'Service type must be one of: In-Person, Home Visit, Gym Facility',
-          // },
-        },
-        price: { type: Number, default: 0 },
-        duration: { type: Number, default: 60 }, // in minutes
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'ServiceType',
       }],
       default: [],
     },
@@ -106,7 +102,7 @@ trainerProfileSchema.methods.calculateCompletion = function () {
     this.certifications && this.certifications.length > 0,
     this.serviceAreas && this.serviceAreas.length > 0,
     this.serviceTypes && this.serviceTypes.length > 0,
-    this.galleryImages && this.galleryImages.length > 0,
+    // this.galleryImages && this.galleryImages.length > 0,
   ];
   const filled = fields.filter(Boolean).length;
   return Math.round((filled / fields.length) * 100);

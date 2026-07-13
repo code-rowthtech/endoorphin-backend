@@ -31,12 +31,17 @@ const createAmenity = asyncWrapper(async (req, res) => {
 });
 
 /**
- * GET /api/venues/:venueId/amenities
+ * GET /api/venues/:venueId/amenities  — filtered by venue
+ * GET /api/amenities                  — all amenities (no venueId)
  */
 const getVenueAmenities = asyncWrapper(async (req, res) => {
-  const amenities = await Amenity.find({ venue: req.params.venueId }).lean();
+  const { venueId } = req.params;
+
+  const query = venueId ? { venue: venueId } : {};
+  const amenities = await Amenity.find(query).lean();
+
   return sendSuccess(res, 200, 'Amenities fetched successfully.', { amenities });
-});
+}); 
 
 /**
  * PUT /api/amenities/:id
@@ -66,4 +71,21 @@ const deleteAmenity = asyncWrapper(async (req, res) => {
   return sendSuccess(res, 200, 'Amenity deleted successfully.', {});
 });
 
-module.exports = { createAmenity, getVenueAmenities, updateAmenity, deleteAmenity };
+/**
+ * POST /api/amenities
+ * Super admin — create a global (master) amenity without a venue.
+ */
+const createGlobalAmenity = asyncWrapper(async (req, res) => {
+  const { name, icon } = req.body;
+
+  const amenity = await Amenity.create({
+    name,
+    icon,
+    venue: null,
+    isCustom: false,
+  });
+
+  return sendSuccess(res, 201, 'Global amenity created successfully.', { amenity });
+});
+
+module.exports = { createAmenity, createGlobalAmenity, getVenueAmenities, updateAmenity, deleteAmenity };

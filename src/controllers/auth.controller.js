@@ -46,7 +46,7 @@ const sendOTP = asyncWrapper(async (req, res) => {
     countryCode,
     expiresAt,
     otpCode
-    };
+  };
 
   // Only expose OTP in dev mode
   if (process.env.NODE_ENV === 'development') {

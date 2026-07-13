@@ -20,8 +20,8 @@ const userSchema = new mongoose.Schema(
     role: {
       type: String,
       enum: {
-        values: ['explorer', 'trainer', 'venue_owner'],
-        message: 'Role must be one of: explorer, trainer, venue_owner',
+        values: ['explorer', 'trainer', 'venue_owner', 'super_admin'],
+        message: 'Role must be one of: explorer, trainer, venue_owner, super_admin',
       },
     },
     profileImage: {

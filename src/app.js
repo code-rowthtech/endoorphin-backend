@@ -13,6 +13,7 @@ const amenityRoutes = require('./routes/amenity.routes');
 const amenityStandaloneRoutes = require('./routes/amenityStandalone.routes');
 const { venueStaffRouter, staffRouter } = require('./routes/staff.routes');
 const categoryRoutes = require('./routes/category.routes');
+const serviceTypeRoutes = require('./routes/serviceType.routes');
 const searchRoutes = require('./routes/search.routes');
 const favoriteRoutes = require('./routes/favorite.routes');
 const uploadRoutes = require('./routes/upload.routes');
@@ -70,6 +71,7 @@ app.use('/api/staff', staffRouter);
 
 app.use('/api/services', serviceRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/service-types', serviceTypeRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/favorites', favoriteRoutes);
 app.use('/api/upload', uploadRoutes);
