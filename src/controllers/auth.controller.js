@@ -5,6 +5,7 @@ const generateOTP = require('../utils/generateOTP');
 const generateToken = require('../utils/generateToken');
 const { sendSuccess, sendError } = require('../utils/apiResponse');
 const asyncWrapper = require('../utils/asyncWrapper');
+const { sendOtp } = require('../middlewares/twilio.middleware');
 
 /**
  * POST /api/auth/send-otp
@@ -31,12 +32,21 @@ const sendOTP = asyncWrapper(async (req, res) => {
     expiresAt,
   });
 
+  // Send OTP via Twilio SMS
+  const fullPhoneNumber = phoneNumber.startsWith('+') ? phoneNumber : `${countryCode}${phoneNumber}`;
+  try {
+    await sendOtp(fullPhoneNumber, otpCode);
+  } catch (twilioError) {
+    console.error('Twilio SMS delivery failed:', twilioError.message);
+    // OTP is still stored; we let dev-mode response expose the code below
+  }
+
   const responseData = {
     phoneNumber,
     countryCode,
-    otpCode,
     expiresAt,
-  };
+    otpCode
+    };
 
   // Only expose OTP in dev mode
   if (process.env.NODE_ENV === 'development') {

@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Service = require('../models/Service');
 const Amenity = require('../models/Amenity');
 const Staff = require('../models/Staff');
+const Favorite = require('../models/Favorite');
 const { sendSuccess, sendError } = require('../utils/apiResponse');
 const asyncWrapper = require('../utils/asyncWrapper');
 const { getFileUrl } = require('../middlewares/upload.middleware');
@@ -171,7 +172,23 @@ const getVenueById = asyncWrapper(async (req, res) => {
     .populate('staff');
 
   if (!venue) return sendError(res, 404, 'Venue not found.');
-  return sendSuccess(res, 200, 'Venue fetched successfully.', { venue });
+
+  // Check if the authenticated user has favorited this venue
+  let isFavorite = false;
+  let favoriteId = null;
+  if (req.user) {
+    const existing = await Favorite.findOne({
+      user: req.user._id,
+      targetType: 'venue',
+      targetId: venue._id,
+    });
+    if (existing) {
+      isFavorite = true;
+      favoriteId = existing._id;
+    }
+  }
+
+  return sendSuccess(res, 200, 'Venue fetched successfully.', { venue, isFavorite, favoriteId });
 });
 
 /**

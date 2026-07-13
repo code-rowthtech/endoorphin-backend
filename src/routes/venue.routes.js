@@ -14,7 +14,7 @@ const {
   getVenueDashboard,
   updateBusinessDays,
 } = require('../controllers/venue.controller');
-const { protect, restrictTo } = require('../middlewares/auth.middleware');
+const { protect, restrictTo, optionalProtect } = require('../middlewares/auth.middleware');
 const validate = require('../middlewares/validate.middleware');
 const { uploadSingle, uploadArray, uploadAny } = require('../middlewares/upload.middleware');
 
@@ -35,7 +35,7 @@ router.post(
 );
 
 // GET /api/venues/:id
-router.get('/:id', [param('id').isMongoId().withMessage('Invalid venue ID.')], validate, getVenueById);
+router.get('/:id', optionalProtect, [param('id').isMongoId().withMessage('Invalid venue ID.')], validate, getVenueById);
 
 // PUT /api/venues/:id
 router.put(

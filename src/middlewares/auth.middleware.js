@@ -86,4 +86,24 @@ const restrictTo = (...roles) => {
   };
 };
 
-module.exports = { protect, restrictTo };
+/**
+ * Optional protect — if a valid Bearer token is provided, attaches req.user.
+ * If no token or invalid token, continues without error (req.user stays undefined).
+ */
+const optionalProtect = async (req, res, next) => {
+  try {
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+      const token = req.headers.authorization.split(' ')[1];
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'endoorphin_secret');
+      const user = await User.findById(decoded.id).select('-__v');
+      if (user && user.isActive) {
+        req.user = user;
+      }
+    }
+  } catch (_) {
+    // Invalid/expired token — just ignore and continue as unauthenticated
+  }
+  next();
+};
+
+module.exports = { protect, restrictTo, optionalProtect };
