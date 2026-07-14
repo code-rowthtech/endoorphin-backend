@@ -209,7 +209,10 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
  * GET /api/trainers/:id
  */
 const getTrainerById = asyncWrapper(async (req, res) => {
-  const profile = await TrainerProfile.findOne({ user: req.params.id }).populate('user', 'fullName phoneNumber profileImage role');
+  const profile = await TrainerProfile.findOne({ user: req.params.id })
+    .populate('user', 'fullName phoneNumber profileImage role')
+    .populate('categories')
+    .populate('serviceTypes');
   if (!profile) {
     return sendError(res, 404, 'Trainer profile not found.');
   }

@@ -14,7 +14,7 @@ venueStaffRouter.post(
   '/',
   protect,
   restrictTo('venue_owner'),
-  uploadSingle('photo'),
+  // uploadSingle('photo'),
   [
     param('venueId').isMongoId().withMessage('Invalid venue ID.'),
     body('name').notEmpty().withMessage('Staff name is required.'),
