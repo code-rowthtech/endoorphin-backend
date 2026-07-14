@@ -42,6 +42,7 @@ const ensureArray = (value) => {
  * Create trainer profile (protected, role=trainer)
  */
 const createTrainerProfile = asyncWrapper(async (req, res) => {
+  console.log(req.body, "req body is ");
   try {
     const existing = await TrainerProfile.findOne({ user: req.user._id });
     if (existing) {
@@ -142,7 +143,7 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
         } else {
           const catName = typeof cat === 'string' ? cat : cat?.name;
           if (catName) {
-            const existing = await Category.findOne({ name: { $regex: new RegExp(`^${catName}$`, 'i') }, isCustom: false, type: 'trainer' });
+            const existing = await Category.findOne({ name: { $regex: new RegExp(`^${catName}$`, 'i') }, type: 'trainer' });
             if (existing) {
               existingCatIds.push(existing._id);
             } else {
@@ -173,7 +174,7 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
         } else {
           const stValue = typeof st === 'string' ? st : (st?.value || st?.name || st?.serviceType);
           if (stValue) {
-            const existing = await ServiceType.findOne({ name: { $regex: new RegExp(`^${stValue}$`, 'i') }, isCustom: false });
+            const existing = await ServiceType.findOne({ name: { $regex: new RegExp(`^${stValue}$`, 'i') } });
             if (existing) {
               existingStIds.push(existing._id);
             } else {
@@ -280,7 +281,7 @@ const updateTrainerProfile = asyncWrapper(async (req, res) => {
         } else {
           const catName = typeof cat === 'string' ? cat : cat?.name;
           if (catName) {
-            const existing = await Category.findOne({ name: { $regex: new RegExp(`^${catName}$`, 'i') }, isCustom: false, type: 'trainer' });
+            const existing = await Category.findOne({ name: { $regex: new RegExp(`^${catName}$`, 'i') }, type: 'trainer' });
             if (existing) {
               existingCatIds.push(existing._id);
             } else {
@@ -318,7 +319,7 @@ const updateTrainerProfile = asyncWrapper(async (req, res) => {
         } else {
           const stValue = typeof st === 'string' ? st : (st?.value || st?.name || st?.serviceType);
           if (stValue) {
-            const existing = await ServiceType.findOne({ name: { $regex: new RegExp(`^${stValue}$`, 'i') }, isCustom: false });
+            const existing = await ServiceType.findOne({ name: { $regex: new RegExp(`^${stValue}$`, 'i') } });
             if (existing) {
               existingStIds.push(existing._id);
             } else {

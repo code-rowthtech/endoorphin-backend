@@ -12,49 +12,62 @@ const { sendOtp } = require('../middlewares/twilio.middleware');
  * Generates and stores a hashed OTP for the given phone number.
  */
 const sendOTP = asyncWrapper(async (req, res) => {
-  const { phoneNumber, countryCode = '+91' } = req.body;
-
-  // Invalidate any existing active OTPs for this number
-  await OTP.deleteMany({ phoneNumber });
-
-  // Generate OTP
-  const otpCode = generateOTP();
-  const expiryMinutes = parseInt(process.env.OTP_EXPIRY_MINUTES, 10) || 5;
-  const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
-
-  // Hash OTP before storing
-  const salt = await bcrypt.genSalt(10);
-  const hashedOTP = await bcrypt.hash(otpCode, salt);
-
-  await OTP.create({
-    phoneNumber,
-    otp: hashedOTP,
-    expiresAt,
-  });
-
-  // Send OTP via Twilio SMS
-  const fullPhoneNumber = phoneNumber.startsWith('+') ? phoneNumber : `${countryCode}${phoneNumber}`;
   try {
-    await sendOtp(fullPhoneNumber, otpCode);
-  } catch (twilioError) {
-    console.error('Twilio SMS delivery failed:', twilioError.message);
-    // OTP is still stored; we let dev-mode response expose the code below
+    const { phoneNumber, countryCode = '+91', type } = req.body;
+
+    if (type === 'login') {
+      const existingUser = await User.findOne({ phoneNumber });
+      if (!existingUser) {
+        return sendError(res, 400, 'User not found, Please Sign Up first');
+      }
+    }
+
+    // Invalidate any existing active OTPs for this number
+    await OTP.deleteMany({ phoneNumber });
+
+    // Generate OTP
+    const otpCode = generateOTP();
+    const expiryMinutes = parseInt(process.env.OTP_EXPIRY_MINUTES, 10) || 5;
+    const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+
+    // Hash OTP before storing
+    const salt = await bcrypt.genSalt(10);
+    const hashedOTP = await bcrypt.hash(otpCode, salt);
+
+    await OTP.create({
+      phoneNumber,
+      otp: hashedOTP,
+      expiresAt,
+    });
+
+    // Send OTP via Twilio SMS
+    const fullPhoneNumber = phoneNumber.startsWith('+') ? phoneNumber : `${countryCode}${phoneNumber}`;
+    try {
+      await sendOtp(fullPhoneNumber, otpCode);
+    } catch (twilioError) {
+      console.error('Twilio SMS delivery failed:', twilioError.message);
+      // OTP is still stored; we let dev-mode response expose the code below
+    }
+
+    const responseData = {
+      phoneNumber,
+      countryCode,
+      expiresAt,
+      otpCode
+    };
+
+    // Only expose OTP in dev mode
+    if (process.env.NODE_ENV === 'development') {
+      responseData.otp = otpCode;
+      responseData.note = 'OTP is shown only in development mode';
+    }
+
+    return sendSuccess(res, 200, 'OTP sent successfully', responseData);
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: "internal server error" })
+
   }
-
-  const responseData = {
-    phoneNumber,
-    countryCode,
-    expiresAt,
-    otpCode
-  };
-
-  // Only expose OTP in dev mode
-  if (process.env.NODE_ENV === 'development') {
-    responseData.otp = otpCode;
-    responseData.note = 'OTP is shown only in development mode';
-  }
-
-  return sendSuccess(res, 200, 'OTP sent successfully', responseData);
 });
 
 /**
