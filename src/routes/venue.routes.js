@@ -44,7 +44,7 @@ router.put(
   restrictTo('venue_owner'),
   (req, res, next) => {
     const ct = req.headers['content-type'] || '';
-    if (ct.includes('multipart/form-data')) return uploadSingle('logo')(req, res, next);
+    if (ct.includes('multipart/form-data')) return uploadAny()(req, res, next);
     next();
   },
   [param('id').isMongoId().withMessage('Invalid venue ID.')],

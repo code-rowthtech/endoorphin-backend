@@ -29,22 +29,22 @@ const addStaff = asyncWrapper(async (req, res) => {
     return sendError(res, 403, 'Unauthorized.');
   }
 
-  let { name, role, phoneNumber, yearsOfExperience, expertise } = req.body;
+  let { name, role, phoneNumber, yearsOfExperience, expertise, photo } = req.body;
   if (!name) return sendError(res, 400, 'Staff name is required.');
 
   expertise = processExpertise(expertise);
 
-  const staffData = { venue: venueId, name, role, phoneNumber, yearsOfExperience, expertise };
-  if (req.file) {
-    staffData.photo = getFileUrl(req, req.file.filename);
-  }
+  const staffData = { venue: venueId, name, role, phoneNumber, yearsOfExperience, expertise, photo };
+  // if (req.file) {
+  //   staffData.photo = getFileUrl(req, req.file.filename);
+  // }
 
   const staff = await Staff.create(staffData);
 
   const updatedVenue = await VenueProfile.findByIdAndUpdate(venueId, {
     $push: { staff: staff._id },
   }, { new: true });
-  
+
   if (updatedVenue) {
     updatedVenue.profileCompletionPercent = updatedVenue.calculateCompletion();
     await updatedVenue.save();
@@ -74,18 +74,19 @@ const updateStaff = asyncWrapper(async (req, res) => {
     return sendError(res, 403, 'Unauthorized.');
   }
 
-  let { name, role, phoneNumber, yearsOfExperience, expertise } = req.body;
+  let { name, role, phoneNumber, yearsOfExperience, expertise, photo } = req.body;
   if (name !== undefined) staffMember.name = name;
   if (role !== undefined) staffMember.role = role;
   if (phoneNumber !== undefined) staffMember.phoneNumber = phoneNumber;
   if (yearsOfExperience !== undefined) staffMember.yearsOfExperience = yearsOfExperience;
-  
+  if (photo !== undefined) staffMember.photo = photo;
+
   expertise = processExpertise(expertise);
   if (expertise !== undefined) staffMember.expertise = expertise;
 
-  if (req.file) {
-    staffMember.photo = getFileUrl(req, req.file.filename);
-  }
+  // if (req.file) {
+  //   staffMember.photo = getFileUrl(req, req.file.filename);
+  // }
 
   await staffMember.save();
   return sendSuccess(res, 200, 'Staff member updated successfully.', { staff: staffMember });

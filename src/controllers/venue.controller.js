@@ -27,6 +27,44 @@ const ensureArray = (value) => {
   return Array.isArray(value) ? value : [value];
 };
 
+const parseImagesField = (field) => {
+  if (!field) return [];
+
+  if (typeof field === 'string') {
+    try {
+      const parsed = JSON.parse(field);
+      return parseImagesField(parsed);
+    } catch (e) {
+      return [field];
+    }
+  }
+
+  if (Array.isArray(field)) {
+    return field.filter(item => typeof item === 'string' && item.trim() !== '');
+  }
+
+  if (typeof field === 'object' && field !== null) {
+    if (field[''] && typeof field[''] === 'string') {
+      try {
+        const parsed = JSON.parse(field['']);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        // Fall through
+      }
+    }
+
+    const values = [];
+    Object.keys(field).forEach(key => {
+      if (key.trim() !== '' && !isNaN(key) && field[key] && typeof field[key] === 'string') {
+        values.push(field[key]);
+      }
+    });
+    if (values.length > 0) return values;
+  }
+
+  return [];
+};
+
 /**
  * POST /api/venues
  * Register a venue — full multi-step payload in one call
@@ -107,6 +145,11 @@ const createVenue = asyncWrapper(async (req, res) => {
     venueData.logo = getFileUrl(req, req.file.filename);
   }
 
+  // Fallback: Check if there are images in the request body (e.g. from Flutter/frontend sending image URLs directly)
+  if (!venueData.venueImages && (req.body.venueImages || req.body.images || req.body.existingImages)) {
+    venueData.venueImages = parseImagesField(req.body.venueImages || req.body.images || req.body.existingImages);
+  }
+
   const venue = await VenueProfile.create(venueData);
 
   // Normalize service & amenity arrays
@@ -126,9 +169,9 @@ const createVenue = asyncWrapper(async (req, res) => {
       } else {
         const itemName = typeof item === 'string' ? item : item?.name;
         if (itemName) {
-          const existing = await Service.findOne({ 
-            name: { $regex: new RegExp(`^${itemName}$`, 'i') }, 
-            isCustom: false 
+          const existing = await Service.findOne({
+            name: { $regex: new RegExp(`^${itemName}$`, 'i') },
+            isCustom: false
           });
           if (existing) {
             existingServiceIds.push(existing._id);
@@ -168,9 +211,9 @@ const createVenue = asyncWrapper(async (req, res) => {
       } else {
         const itemName = typeof item === 'string' ? item : item?.name;
         if (itemName) {
-          const existing = await Amenity.findOne({ 
-            name: { $regex: new RegExp(`^${itemName}$`, 'i') }, 
-            isCustom: false 
+          const existing = await Amenity.findOne({
+            name: { $regex: new RegExp(`^${itemName}$`, 'i') },
+            isCustom: false
           });
           if (existing) {
             existingIds.push(existing._id);
@@ -255,7 +298,7 @@ const getVenueById = asyncWrapper(async (req, res) => {
   const globalAmenities = await Amenity.find({ venue: null }).lean();
   const populatedAmenities = venue.amenities || [];
   const storedAmenityIds = new Set(populatedAmenities.map((a) => (a._id ? a._id.toString() : a.toString())));
-  
+
   const globalAmenitiesWithFlag = globalAmenities.map((amenity) => ({
     ...amenity,
     isStored: storedAmenityIds.has(amenity._id.toString()),
@@ -290,7 +333,6 @@ const getVenueById = asyncWrapper(async (req, res) => {
  * PUT /api/venues/:id
  */
 const updateVenue = asyncWrapper(async (req, res) => {
-  console.log(req.body)
   try {
     const venue = await VenueProfile.findById(req.params.id);
     if (!venue) return sendError(res, 404, 'Venue not found.');
@@ -341,14 +383,40 @@ const updateVenue = asyncWrapper(async (req, res) => {
     };
 
     // Update Logo
-    if (req.file) {
+    if (req.files && req.files.length > 0) {
+      const logoFile = req.files.find(f => f.fieldname === 'logo');
+      if (logoFile) {
+        venue.logo = getFileUrl(req, logoFile.filename);
+      }
+    } else if (req.file) {
       venue.logo = getFileUrl(req, req.file.filename);
+    }
+
+    // Update Venue Images
+    let incomingImages = [];
+    if (req.body.venueImages !== undefined || req.body.images !== undefined || req.body.existingImages !== undefined) {
+      incomingImages = parseImagesField(req.body.venueImages || req.body.images || req.body.existingImages);
+    } else {
+      incomingImages = venue.venueImages || [];
+    }
+
+    if (req.files && req.files.length > 0) {
+      const uploadedImages = req.files
+        .filter(f => f.fieldname === 'venueImages' || f.fieldname === 'images')
+        .map(f => getFileUrl(req, f.filename));
+      if (uploadedImages.length > 0) {
+        incomingImages = [...incomingImages, ...uploadedImages];
+      }
+    }
+
+    if (req.body.venueImages !== undefined || req.body.images !== undefined || req.body.existingImages !== undefined || (req.files && req.files.length > 0)) {
+      venue.venueImages = incomingImages.slice(0, 15); // limit to 15 images
     }
 
     // Update Services
     if (req.body.serviceNames !== undefined || req.body.services !== undefined) {
       let finalServiceNames = ensureArray(parseJSONField(req.body.serviceNames || req.body.services)) || [];
-      
+
       const existingServiceIds = [];
       const customServiceItems = [];
 
@@ -360,9 +428,9 @@ const updateVenue = asyncWrapper(async (req, res) => {
         } else {
           const itemName = typeof item === 'string' ? item : item?.name;
           if (itemName) {
-            const existing = await Service.findOne({ 
-              name: { $regex: new RegExp(`^${itemName}$`, 'i') }, 
-              isCustom: false 
+            const existing = await Service.findOne({
+              name: { $regex: new RegExp(`^${itemName}$`, 'i') },
+              isCustom: false
             });
             if (existing) {
               existingServiceIds.push(existing._id);
@@ -419,9 +487,9 @@ const updateVenue = asyncWrapper(async (req, res) => {
 
           // Check if a global/admin amenity with this name already exists
           if (itemName) {
-            const existing = await Amenity.findOne({ 
-              name: { $regex: new RegExp(`^${itemName}$`, 'i') }, 
-              isCustom: false 
+            const existing = await Amenity.findOne({
+              name: { $regex: new RegExp(`^${itemName}$`, 'i') },
+              isCustom: false
             });
             if (existing) {
               // Found a matching admin amenity — link it, don't create duplicate
