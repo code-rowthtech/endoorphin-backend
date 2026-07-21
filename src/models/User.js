@@ -12,6 +12,16 @@ const userSchema = new mongoose.Schema(
       unique: true,
       trim: true,
     },
+    email: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+      lowercase: true,
+    },
+    password: {
+      type: String,
+    },
     countryCode: {
       type: String,
       default: '+91',
@@ -20,8 +30,8 @@ const userSchema = new mongoose.Schema(
     role: {
       type: String,
       enum: {
-        values: ['explorer', 'trainer', 'venue_owner', 'super_admin'],
-        message: 'Role must be one of: explorer, trainer, venue_owner, super_admin',
+        values: ['explorer', 'trainer', 'venue_owner', 'super_admin', 'general_manager'],
+        message: 'Role must be one of: explorer, trainer, venue_owner, super_admin, general_manager',
       },
     },
     profileImage: {
@@ -36,9 +46,18 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
     preferredLanguage: {
       type: String,
       default: 'en',
+    },
+    managedVenue: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'VenueProfile',
+      default: null,
     },
   },
   {

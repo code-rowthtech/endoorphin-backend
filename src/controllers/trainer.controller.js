@@ -54,6 +54,7 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
     let parsedServiceAreas = parseJSONField(req.body.serviceAreas);
     let parsedCertifications = parseJSONField(req.body.certifications);
     let parsedGalleryImages = parseJSONField(req.body.galleryImages);
+    let parsedVenues = parseJSONField(req.body.venues);
 
     // If it parsed into a single object (or was passed as a single string), wrap in array
     if (req.body.categories !== undefined) {
@@ -84,6 +85,9 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
     if (req.body.galleryImages !== undefined) {
       parsedGalleryImages = ensureArray(parsedGalleryImages);
     }
+    if (req.body.venues !== undefined) {
+      parsedVenues = ensureArray(parsedVenues);
+    }
 
     const profileData = {
       user: req.user._id,
@@ -94,6 +98,7 @@ const createTrainerProfile = asyncWrapper(async (req, res) => {
     if (parsedServiceAreas) profileData.serviceAreas = parsedServiceAreas;
     if (parsedCertifications) profileData.certifications = parsedCertifications;
     if (parsedGalleryImages) profileData.galleryImages = parsedGalleryImages;
+    if (parsedVenues) profileData.venues = parsedVenues;
 
     // Handle directly uploaded files from uploadAny()
     if (req.files && Array.isArray(req.files)) {
@@ -212,7 +217,8 @@ const getTrainerById = asyncWrapper(async (req, res) => {
   const profile = await TrainerProfile.findOne({ user: req.params.id })
     .populate('user', 'fullName phoneNumber profileImage role')
     .populate('categories')
-    .populate('serviceTypes');
+    .populate('serviceTypes')
+    .populate('venues');
   if (!profile) {
     return sendError(res, 404, 'Trainer profile not found.');
   }
@@ -234,7 +240,7 @@ const updateTrainerProfile = asyncWrapper(async (req, res) => {
       return sendError(res, 403, 'You are not authorized to update this profile.');
     }
 
-    const allowedFields = ['fullName', 'yearsOfExperience', 'shortBio', 'categories', 'serviceTypes', 'serviceAreas', 'certifications', 'galleryImages'];
+    const allowedFields = ['fullName', 'yearsOfExperience', 'shortBio', 'categories', 'serviceTypes', 'serviceAreas', 'certifications', 'galleryImages', 'venues'];
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) {
         if (field === 'categories') {
@@ -263,6 +269,10 @@ const updateTrainerProfile = asyncWrapper(async (req, res) => {
           });
           profile[field] = parsed;
         } else if (field === 'galleryImages') {
+          let parsed = parseJSONField(req.body[field]);
+          parsed = ensureArray(parsed);
+          profile[field] = parsed;
+        } else if (field === 'venues') {
           let parsed = parseJSONField(req.body[field]);
           parsed = ensureArray(parsed);
           profile[field] = parsed;
@@ -479,7 +489,8 @@ const listTrainers = asyncWrapper(async (req, res) => {
     trainers = await TrainerProfile.populate(trainers, [
       { path: 'user', select: 'fullName phoneNumber profileImage' },
       { path: 'categories' },
-      { path: 'serviceTypes' }
+      { path: 'serviceTypes' },
+      { path: 'venues' }
     ]);
     // Aggregation total would require a facet, approximating with length for now as before
     total = trainers.length;
@@ -490,6 +501,7 @@ const listTrainers = asyncWrapper(async (req, res) => {
       .populate('user', 'fullName phoneNumber profileImage')
       .populate('categories')
       .populate('serviceTypes')
+      .populate('venues')
       .skip(skip)
       .limit(limitNum)
       .lean();
@@ -738,7 +750,8 @@ const getTrainerDashboard = asyncWrapper(async (req, res) => {
   const profile = await TrainerProfile.findOne({ user: req.params.id })
     .populate('user', 'fullName phoneNumber profileImage')
     .populate('categories')
-    .populate('serviceTypes');
+    .populate('serviceTypes')
+    .populate('venues');
 
   if (!profile) {
     const user = await User.findById(req.params.id);

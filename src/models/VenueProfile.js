@@ -12,7 +12,16 @@ const venueProfileSchema = new mongoose.Schema(
       required: [true, 'Company name is required'],
       trim: true,
     },
+    generalManager: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
     logo: {
+      type: String,
+      default: null,
+    },
+    tradingLicense: {
       type: String,
       default: null,
     },
@@ -24,6 +33,11 @@ const venueProfileSchema = new mongoose.Schema(
       type: String,
       trim: true,
       lowercase: true,
+    },
+    websiteUrl: {
+      type: String,
+      trim: true,
+      default: null,
     },
     aboutVenue: {
       type: String,
@@ -102,6 +116,14 @@ const venueProfileSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -119,6 +141,8 @@ venueProfileSchema.methods.calculateCompletion = function () {
     this.email,
     this.aboutVenue,
     this.logo,
+    this.tradingLicense,
+    this.websiteUrl,
     this.venueImages && this.venueImages.length > 0,
     this.address && this.address.city,
     this.services && this.services.length > 0,

@@ -25,7 +25,7 @@ router.get('/', listVenues);
 router.post(
   '/',
   protect,
-  restrictTo('venue_owner'),
+  restrictTo('venue_owner', 'general_manager'),
   uploadAny(),
   [
     body('companyName').notEmpty().withMessage('Company name is required.').trim(),
@@ -41,7 +41,7 @@ router.get('/:id', optionalProtect, [param('id').isMongoId().withMessage('Invali
 router.put(
   '/:id',
   protect,
-  restrictTo('venue_owner'),
+  restrictTo('venue_owner', 'general_manager'),
   (req, res, next) => {
     const ct = req.headers['content-type'] || '';
     if (ct.includes('multipart/form-data')) return uploadAny()(req, res, next);
@@ -56,7 +56,7 @@ router.put(
 router.delete(
   '/:id',
   protect,
-  restrictTo('venue_owner'),
+  restrictTo('venue_owner', 'general_manager'),
   [param('id').isMongoId().withMessage('Invalid venue ID.')],
   validate,
   deleteVenue
@@ -66,7 +66,7 @@ router.delete(
 router.post(
   '/:id/add-another',
   protect,
-  restrictTo('venue_owner'),
+  restrictTo('venue_owner', 'general_manager'),
   uploadAny(),
   [body('companyName').notEmpty().withMessage('Company name is required.')],
   validate,
@@ -77,7 +77,7 @@ router.post(
 router.get(
   '/:id/dashboard',
   protect,
-  restrictTo('venue_owner'),
+  restrictTo('venue_owner', 'general_manager'),
   [param('id').isMongoId().withMessage('Invalid venue ID.')],
   validate,
   getVenueDashboard
@@ -87,7 +87,7 @@ router.get(
 router.put(
   '/:id/business-days',
   protect,
-  restrictTo('venue_owner'),
+  restrictTo('venue_owner', 'general_manager'),
   [
     param('id').isMongoId().withMessage('Invalid venue ID.'),
     body('businessDays').isArray().withMessage('businessDays must be an array.')
@@ -100,7 +100,7 @@ router.put(
 router.post(
   '/:id/logo',
   protect,
-  restrictTo('venue_owner'),
+  restrictTo('venue_owner', 'general_manager'),
   uploadSingle('logo'),
   [param('id').isMongoId().withMessage('Invalid venue ID.')],
   validate,
@@ -111,7 +111,7 @@ router.post(
 router.post(
   '/:id/images',
   protect,
-  restrictTo('venue_owner'),
+  restrictTo('venue_owner', 'general_manager'),
   uploadArray('venueImages', 15),
   [param('id').isMongoId().withMessage('Invalid venue ID.')],
   validate,
@@ -122,7 +122,7 @@ router.post(
 router.delete(
   '/:id/images/:imageId',
   protect,
-  restrictTo('venue_owner'),
+  restrictTo('venue_owner', 'general_manager'),
   [param('id').isMongoId().withMessage('Invalid venue ID.')],
   validate,
   deleteVenueImage

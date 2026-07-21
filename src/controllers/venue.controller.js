@@ -10,6 +10,20 @@ const asyncWrapper = require('../utils/asyncWrapper');
 const { getFileUrl } = require('../middlewares/upload.middleware');
 const { buildGeoNearStage } = require('../utils/distanceCalculator');
 
+// --- IN-MEMORY CACHE FOR GLOBALS ---
+let cachedGlobals = { amenities: null, services: null, lastFetched: 0 };
+const getGlobals = async () => {
+  const now = Date.now();
+  if (cachedGlobals.amenities && cachedGlobals.services && now - cachedGlobals.lastFetched < 300000) { // 5 mins
+    return cachedGlobals;
+  }
+  const amenities = await Amenity.find({ venue: null }).lean();
+  const services = await Service.find({ venue: null, trainer: null }).lean();
+  cachedGlobals = { amenities, services, lastFetched: now };
+  return cachedGlobals;
+};
+// -----------------------------------
+
 const parseJSONField = (field) => {
   if (!field) return field;
   if (typeof field === 'string') {
@@ -90,6 +104,9 @@ const createVenue = asyncWrapper(async (req, res) => {
     amenities,      // flutter fallback
     phone,          // flutter fallback
     about,          // flutter fallback
+    tradingLicense,
+    websiteUrl,
+    gmName, gmEmail, gmPhoneNumber, gmProfileImage
   } = req.body;
 
   if (!companyName) {
@@ -128,21 +145,36 @@ const createVenue = asyncWrapper(async (req, res) => {
       pincode
     },
     location,
+    tradingLicense,
+    websiteUrl,
   };
 
   // Handle flexible file uploads (uploadAny populates req.files array)
   if (req.files && req.files.length > 0) {
-    const logoFile = req.files.find(f => f.fieldname === 'logo') || req.files[0];
+    const logoFile = req.files.find(f => f.fieldname === 'logo') || (req.files.find(f => f.fieldname !== 'tradingLicense' && f.fieldname !== 'venueImages' && f.fieldname !== 'images'));
     if (logoFile) {
       venueData.logo = getFileUrl(req, logoFile.filename);
     }
+    
+    const tradingLicenseFile = req.files.find(f => f.fieldname === 'tradingLicense');
+    if (tradingLicenseFile) {
+      if (!tradingLicenseFile.mimetype.startsWith('image/') && tradingLicenseFile.mimetype !== 'application/pdf') {
+        return sendError(res, 400, 'Trading license must be a PDF or an image.');
+      }
+      venueData.tradingLicense = getFileUrl(req, tradingLicenseFile.filename);
+    }
 
-    const imageFiles = req.files.filter(f => f.fieldname === 'venueImages' || f.fieldname === 'images' || f !== logoFile);
+    const imageFiles = req.files.filter(f => f.fieldname === 'venueImages' || f.fieldname === 'images' || (f !== logoFile && f !== tradingLicenseFile));
     if (imageFiles.length > 0) {
       venueData.venueImages = imageFiles.map(f => getFileUrl(req, f.filename));
     }
-  } else if (req.file) {
+  } else if (req.file && req.file.fieldname !== 'tradingLicense') {
     venueData.logo = getFileUrl(req, req.file.filename);
+  } else if (req.file && req.file.fieldname === 'tradingLicense') {
+    if (!req.file.mimetype.startsWith('image/') && req.file.mimetype !== 'application/pdf') {
+      return sendError(res, 400, 'Trading license must be a PDF or an image.');
+    }
+    venueData.tradingLicense = getFileUrl(req, req.file.filename);
   }
 
   // Fallback: Check if there are images in the request body (e.g. from Flutter/frontend sending image URLs directly)
@@ -150,7 +182,40 @@ const createVenue = asyncWrapper(async (req, res) => {
     venueData.venueImages = parseImagesField(req.body.venueImages || req.body.images || req.body.existingImages);
   }
 
+  // Handle General Manager
+  if (gmPhoneNumber || gmEmail) {
+    let query = [];
+    if (gmPhoneNumber) query.push({ phoneNumber: gmPhoneNumber });
+    if (gmEmail) query.push({ email: gmEmail.toLowerCase() });
+
+    let gmUser = null;
+    if (query.length > 0) {
+       gmUser = await User.findOne({ $or: query });
+    }
+
+    if (!gmUser) {
+      gmUser = await User.create({
+        fullName: gmName || 'General Manager',
+        email: gmEmail ? gmEmail.toLowerCase() : undefined,
+        phoneNumber: gmPhoneNumber,
+        profileImage: gmProfileImage || null,
+        role: 'general_manager',
+        isActive: true,
+        isVerified: true,
+      });
+    } else {
+       gmUser.role = 'general_manager';
+       await gmUser.save();
+    }
+    
+    venueData.generalManager = gmUser._id;
+  }
+
   const venue = await VenueProfile.create(venueData);
+
+  if (venueData.generalManager) {
+    await User.findByIdAndUpdate(venueData.generalManager, { managedVenue: venue._id });
+  }
 
   // Normalize service & amenity arrays
   let finalServiceNames = ensureArray(parseJSONField(serviceNames || services));
@@ -336,11 +401,14 @@ const updateVenue = asyncWrapper(async (req, res) => {
   try {
     const venue = await VenueProfile.findById(req.params.id);
     if (!venue) return sendError(res, 404, 'Venue not found.');
-    if (venue.owner.toString() !== req.user._id.toString()) {
+    
+    const isOwner = venue.owner.toString() === req.user._id.toString();
+    const isGM = req.user.role === 'general_manager' && venue.generalManager?.toString() === req.user._id.toString();
+    if (!isOwner && !isGM) {
       return sendError(res, 403, 'Unauthorized.');
     }
 
-    const allowedFields = ['companyName', 'email', 'aboutVenue'];
+    const allowedFields = ['companyName', 'email', 'aboutVenue', 'tradingLicense', 'websiteUrl'];
     allowedFields.forEach((field) => {
       if (req.body[field] !== undefined) venue[field] = req.body[field];
     });
@@ -388,8 +456,21 @@ const updateVenue = asyncWrapper(async (req, res) => {
       if (logoFile) {
         venue.logo = getFileUrl(req, logoFile.filename);
       }
-    } else if (req.file) {
+      
+      const tradingLicenseFile = req.files.find(f => f.fieldname === 'tradingLicense');
+      if (tradingLicenseFile) {
+        if (!tradingLicenseFile.mimetype.startsWith('image/') && tradingLicenseFile.mimetype !== 'application/pdf') {
+          return sendError(res, 400, 'Trading license must be a PDF or an image.');
+        }
+        venue.tradingLicense = getFileUrl(req, tradingLicenseFile.filename);
+      }
+    } else if (req.file && req.file.fieldname !== 'tradingLicense') {
       venue.logo = getFileUrl(req, req.file.filename);
+    } else if (req.file && req.file.fieldname === 'tradingLicense') {
+      if (!req.file.mimetype.startsWith('image/') && req.file.mimetype !== 'application/pdf') {
+        return sendError(res, 400, 'Trading license must be a PDF or an image.');
+      }
+      venue.tradingLicense = getFileUrl(req, req.file.filename);
     }
 
     // Update Venue Images
@@ -548,9 +629,13 @@ const updateVenue = asyncWrapper(async (req, res) => {
 const deleteVenue = asyncWrapper(async (req, res) => {
   const venue = await VenueProfile.findById(req.params.id);
   if (!venue) return sendError(res, 404, 'Venue not found.');
-  if (venue.owner.toString() !== req.user._id.toString()) {
+  
+  const isOwner = venue.owner.toString() === req.user._id.toString();
+  const isGM = req.user.role === 'general_manager' && venue.generalManager?.toString() === req.user._id.toString();
+  if (!isOwner && !isGM) {
     return sendError(res, 403, 'Unauthorized.');
   }
+  
   await venue.deleteOne();
   return sendSuccess(res, 200, 'Venue deleted successfully.', {});
 });
@@ -629,11 +714,11 @@ const listVenues = asyncWrapper(async (req, res) => {
     venues = await VenueProfile.populate(venues, [
       { path: 'owner', select: 'fullName phoneNumber' },
       { path: 'services' },
-      { path: 'amenities' }
+      { path: 'amenities' },
+      // { path: 'staff' }
     ]);
 
-    const globalAmenities = await Amenity.find({ venue: null }).lean();
-    const globalServices = await Service.find({ venue: null, trainer: null }).lean();
+    const { amenities: globalAmenities, services: globalServices } = await getGlobals();
 
     const mappedVenues = venues.map((venue) => {
       // Amenities
@@ -695,8 +780,7 @@ const listVenues = asyncWrapper(async (req, res) => {
     .limit(limitNum)
     .lean();
 
-  const globalAmenities = await Amenity.find({ venue: null }).lean();
-  const globalServices = await Service.find({ venue: null, trainer: null }).lean();
+  const { amenities: globalAmenities, services: globalServices } = await getGlobals();
 
   const mappedVenues = venues.map((venue) => {
     // Amenities
@@ -744,9 +828,13 @@ const listVenues = asyncWrapper(async (req, res) => {
 const uploadVenueLogo = asyncWrapper(async (req, res) => {
   const venue = await VenueProfile.findById(req.params.id);
   if (!venue) return sendError(res, 404, 'Venue not found.');
-  if (venue.owner.toString() !== req.user._id.toString()) {
+  
+  const isOwner = venue.owner.toString() === req.user._id.toString();
+  const isGM = req.user.role === 'general_manager' && venue.generalManager?.toString() === req.user._id.toString();
+  if (!isOwner && !isGM) {
     return sendError(res, 403, 'Unauthorized.');
   }
+
   if (!req.file) return sendError(res, 400, 'No file uploaded.');
 
   venue.logo = getFileUrl(req, req.file.filename);
@@ -762,9 +850,13 @@ const uploadVenueLogo = asyncWrapper(async (req, res) => {
 const uploadVenueImages = asyncWrapper(async (req, res) => {
   const venue = await VenueProfile.findById(req.params.id);
   if (!venue) return sendError(res, 404, 'Venue not found.');
-  if (venue.owner.toString() !== req.user._id.toString()) {
+  
+  const isOwner = venue.owner.toString() === req.user._id.toString();
+  const isGM = req.user.role === 'general_manager' && venue.generalManager?.toString() === req.user._id.toString();
+  if (!isOwner && !isGM) {
     return sendError(res, 403, 'Unauthorized.');
   }
+  
   if (!req.files || req.files.length === 0) {
     return sendError(res, 400, 'No files uploaded.');
   }
@@ -792,7 +884,10 @@ const uploadVenueImages = asyncWrapper(async (req, res) => {
 const deleteVenueImage = asyncWrapper(async (req, res) => {
   const venue = await VenueProfile.findById(req.params.id);
   if (!venue) return sendError(res, 404, 'Venue not found.');
-  if (venue.owner.toString() !== req.user._id.toString()) {
+  
+  const isOwner = venue.owner.toString() === req.user._id.toString();
+  const isGM = req.user.role === 'general_manager' && venue.generalManager?.toString() === req.user._id.toString();
+  if (!isOwner && !isGM) {
     return sendError(res, 403, 'Unauthorized.');
   }
 
@@ -820,12 +915,15 @@ const getVenueDashboard = asyncWrapper(async (req, res) => {
     .populate('staff');
 
   if (!venue) return sendError(res, 404, 'Venue not found.');
-  if (venue.owner.toString() !== req.user._id.toString()) {
+  
+  const isOwner = venue.owner.toString() === req.user._id.toString();
+  const isGM = req.user.role === 'general_manager' && venue.generalManager?.toString() === req.user._id.toString();
+  if (!isOwner && !isGM) {
     return sendError(res, 403, 'Unauthorized.');
   }
 
-  // Count total venues by this owner
-  const totalVenues = await VenueProfile.countDocuments({ owner: req.user._id });
+  // Count total venues by this owner (or GM if they only have 1)
+  const totalVenues = await VenueProfile.countDocuments(isOwner ? { owner: req.user._id } : { _id: venue._id });
 
   // Active staff count
   const activeTrainersStaffCount = venue.staff ? venue.staff.length : 0;
@@ -845,7 +943,10 @@ const getVenueDashboard = asyncWrapper(async (req, res) => {
 const updateBusinessDays = asyncWrapper(async (req, res) => {
   const venue = await VenueProfile.findById(req.params.id);
   if (!venue) return sendError(res, 404, 'Venue not found.');
-  if (venue.owner.toString() !== req.user._id.toString()) {
+  
+  const isOwner = venue.owner.toString() === req.user._id.toString();
+  const isGM = req.user.role === 'general_manager' && venue.generalManager?.toString() === req.user._id.toString();
+  if (!isOwner && !isGM) {
     return sendError(res, 403, 'Unauthorized.');
   }
 
