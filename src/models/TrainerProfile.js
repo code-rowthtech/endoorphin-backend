@@ -57,6 +57,13 @@ const trainerProfileSchema = new mongoose.Schema(
       }],
       default: [],
     },
+    venues: {
+      type: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'VenueProfile',
+      }],
+      default: [],
+    },
     certifications: {
       type: [certificationSchema],
       default: [],
@@ -82,6 +89,23 @@ const trainerProfileSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    approvalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+    },
+    rejectionReason: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -102,6 +126,7 @@ trainerProfileSchema.methods.calculateCompletion = function () {
     this.certifications && this.certifications.length > 0,
     this.serviceAreas && this.serviceAreas.length > 0,
     this.serviceTypes && this.serviceTypes.length > 0,
+    this.venues && this.venues.length > 0,
     // this.galleryImages && this.galleryImages.length > 0,
   ];
   const filled = fields.filter(Boolean).length;

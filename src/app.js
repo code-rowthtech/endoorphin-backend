@@ -17,6 +17,7 @@ const serviceTypeRoutes = require('./routes/serviceType.routes');
 const searchRoutes = require('./routes/search.routes');
 const favoriteRoutes = require('./routes/favorite.routes');
 const uploadRoutes = require('./routes/upload.routes');
+const adminRoutes = require('./routes/adminRoutes');
 
 const { errorHandler, notFound } = require('./middlewares/error.middleware');
 
@@ -75,6 +76,7 @@ app.use('/api/service-types', serviceTypeRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/favorites', favoriteRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/admin', adminRoutes);
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use(notFound);

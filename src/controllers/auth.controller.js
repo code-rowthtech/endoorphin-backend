@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const TrainerProfile = require('../models/TrainerProfile');
 const OTP = require('../models/OTP');
 const generateOTP = require('../utils/generateOTP');
 const generateToken = require('../utils/generateToken');
@@ -107,6 +108,18 @@ const verifyOTP = asyncWrapper(async (req, res) => {
   } else {
     user.isVerified = true;
     await user.save();
+    
+    if (user.role === 'trainer') {
+      const trainerProfile = await TrainerProfile.findOne({ user: user._id });
+      if (trainerProfile) {
+        if (trainerProfile.approvalStatus === 'pending') {
+          return sendError(res, 403, 'Your trainer profile is currently pending admin approval.');
+        }
+        if (trainerProfile.approvalStatus === 'rejected') {
+          return sendError(res, 403, `Your trainer profile has been rejected. Reason: ${trainerProfile.rejectionReason || 'Please contact support.'}`);
+        }
+      }
+    }
   }
 
   const token = generateToken(user._id);
