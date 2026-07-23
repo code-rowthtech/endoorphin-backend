@@ -123,8 +123,60 @@ exports.createVenue = asyncWrapper(async (req, res) => {
         return sendError(res, 400, 'fullName, email, phoneNumber and companyName are required');
     }
 
-    // Validate images count
-    if (venueImages && venueImages.length > 15) {
+    const parsedAddress = parseJSONField(address);
+    const parsedLocation = parseJSONField(location);
+    const parsedBusinessDays = ensureArray(parseJSONField(businessDays)) || [];
+
+    const servicesField = rawServices || req.body['services[]'];
+    const finalRawServices = servicesField ? ensureArray(parseJSONField(servicesField)) : [];
+
+    const amenitiesField = rawAmenities || req.body['amenities[]'];
+    const finalRawAmenities = amenitiesField ? ensureArray(parseJSONField(amenitiesField)) : [];
+
+    let parsedVenueImages = [];
+    if (venueImages) {
+        const parsed = parseJSONField(venueImages);
+        if (parsed) {
+            parsedVenueImages = ensureArray(parsed).filter(img => typeof img === 'string' && img.startsWith('http'));
+        }
+    }
+
+    let finalTradingLicense = tradingLicense || null;
+    let finalGmProfileImage = gmProfileImage || null;
+    let uploadedImages = [];
+
+    if (req.files && req.files.length > 0) {
+        const tradingLicenseFile = req.files.find(f => f.fieldname === 'tradingLicense');
+        if (tradingLicenseFile) {
+            if (!tradingLicenseFile.mimetype.startsWith('image/') && tradingLicenseFile.mimetype !== 'application/pdf') {
+                return sendError(res, 400, 'Trading license must be a PDF or an image.');
+            }
+            finalTradingLicense = getFileUrl(req, tradingLicenseFile.filename);
+        }
+
+        const gmProfileImageFile = req.files.find(f => f.fieldname === 'gmProfileImage');
+        if (gmProfileImageFile) {
+            finalGmProfileImage = getFileUrl(req, gmProfileImageFile.filename);
+        }
+
+        uploadedImages = req.files
+            .filter(f => f.fieldname === 'venueImages' || f.fieldname === 'venueImages[]')
+            .map(f => getFileUrl(req, f.filename));
+    } else if (req.file) {
+        if (req.file.fieldname === 'tradingLicense') {
+            if (!req.file.mimetype.startsWith('image/') && req.file.mimetype !== 'application/pdf') {
+                return sendError(res, 400, 'Trading license must be a PDF or an image.');
+            }
+            finalTradingLicense = getFileUrl(req, req.file.filename);
+        } else if (req.file.fieldname === 'gmProfileImage') {
+            finalGmProfileImage = getFileUrl(req, req.file.filename);
+        } else if (req.file.fieldname === 'venueImages' || req.file.fieldname === 'venueImages[]') {
+            uploadedImages = [getFileUrl(req, req.file.filename)];
+        }
+    }
+
+    let finalVenueImages = [...parsedVenueImages, ...uploadedImages];
+    if (finalVenueImages.length > 15) {
         return sendError(res, 400, 'Maximum 15 venue images allowed');
     }
 
@@ -146,8 +198,8 @@ exports.createVenue = asyncWrapper(async (req, res) => {
 
     // Step 2: Resolve services — existing _id OR create new custom Service
     const resolvedServices = [];
-    if (Array.isArray(rawServices)) {
-        for (const item of rawServices) {
+    if (Array.isArray(finalRawServices)) {
+        for (const item of finalRawServices) {
             if (mongoose.Types.ObjectId.isValid(item)) {
                 // Existing service
                 resolvedServices.push(item);
@@ -165,8 +217,8 @@ exports.createVenue = asyncWrapper(async (req, res) => {
 
     // Step 3: Resolve amenities — existing _id OR create new custom Amenity
     const resolvedAmenities = [];
-    if (Array.isArray(rawAmenities)) {
-        for (const item of rawAmenities) {
+    if (Array.isArray(finalRawAmenities)) {
+        for (const item of finalRawAmenities) {
             if (mongoose.Types.ObjectId.isValid(item)) {
                 resolvedAmenities.push(item);
             } else {
@@ -180,39 +232,43 @@ exports.createVenue = asyncWrapper(async (req, res) => {
         }
     }
 
+    let finalLng = 0;
+    let finalLat = 0;
+    if (parsedLocation) {
+        if (Array.isArray(parsedLocation.coordinates) && parsedLocation.coordinates.length >= 2) {
+            finalLng = parseFloat(parsedLocation.coordinates[0]) || 0;
+            finalLat = parseFloat(parsedLocation.coordinates[1]) || 0;
+        } else {
+            finalLng = parseFloat(parsedLocation.lng) || parseFloat(parsedLocation.longitude) || 0;
+            finalLat = parseFloat(parsedLocation.lat) || parseFloat(parsedLocation.latitude) || 0;
+        }
+    }
+
+    if (finalLat < -90 || finalLat > 90) {
+        return sendError(res, 400, 'Latitude must be between -90 and 90');
+    }
+    if (finalLng < -180 || finalLng > 180) {
+        return sendError(res, 400, 'Longitude must be between -180 and 180');
+    }
+
     const venueData = {
         owner: owner._id,
         companyName,
         phoneNumber: venuePhoneNumber || phoneNumber,
         email: venueEmail || email,
         aboutVenue,
-        address,
+        address: parsedAddress,
         location: {
             type: 'Point',
-            coordinates: [parseFloat(location?.lng) || 0, parseFloat(location?.lat) || 0],
+            coordinates: [finalLng, finalLat],
         },
-        businessDays: businessDays || [],
-        venueImages: venueImages || [],
-        tradingLicense: tradingLicense || null,
+        businessDays: parsedBusinessDays,
+        venueImages: finalVenueImages,
+        tradingLicense: finalTradingLicense,
         websiteUrl: websiteUrl || null,
         services: resolvedServices,
         amenities: resolvedAmenities,
     };
-
-    if (req.files && req.files.length > 0) {
-        const tradingLicenseFile = req.files.find(f => f.fieldname === 'tradingLicense');
-        if (tradingLicenseFile) {
-            if (!tradingLicenseFile.mimetype.startsWith('image/') && tradingLicenseFile.mimetype !== 'application/pdf') {
-                return sendError(res, 400, 'Trading license must be a PDF or an image.');
-            }
-            venueData.tradingLicense = getFileUrl(req, tradingLicenseFile.filename);
-        }
-    } else if (req.file && req.file.fieldname === 'tradingLicense') {
-        if (!req.file.mimetype.startsWith('image/') && req.file.mimetype !== 'application/pdf') {
-            return sendError(res, 400, 'Trading license must be a PDF or an image.');
-        }
-        venueData.tradingLicense = getFileUrl(req, req.file.filename);
-    }
 
     // Handle General Manager
     if (gmPhoneNumber || gmEmail) {
@@ -227,13 +283,14 @@ exports.createVenue = asyncWrapper(async (req, res) => {
                 fullName: gmName || 'General Manager',
                 email: gmEmail ? gmEmail.toLowerCase() : undefined,
                 phoneNumber: gmPhoneNumber,
-                profileImage: gmProfileImage || null,
+                profileImage: finalGmProfileImage,
                 role: 'general_manager',
                 isActive: true,
                 isVerified: true
             });
         } else {
             gmUser.role = 'general_manager';
+            if (finalGmProfileImage) gmUser.profileImage = finalGmProfileImage;
             await gmUser.save();
         }
 
@@ -268,6 +325,8 @@ exports.updateVenue = asyncWrapper(async (req, res) => {
         venueEmail, venuePhoneNumber,
         address, location, businessDays, venueImages, tradingLicense, websiteUrl,
         services: rawServices, amenities: rawAmenities,
+        // General Manager details
+        gmName, gmEmail, gmPhoneNumber, gmProfileImage
     } = req.body;
 
     if (owner) {
@@ -276,14 +335,73 @@ exports.updateVenue = asyncWrapper(async (req, res) => {
         await owner.save();
     }
 
-    if (venueImages && venueImages.length > 15) {
-        return sendError(res, 400, 'Maximum 15 venue images allowed');
+    const parsedAddress = parseJSONField(address);
+    const parsedLocation = parseJSONField(location);
+    const parsedBusinessDays = businessDays ? ensureArray(parseJSONField(businessDays)) : null;
+
+    const servicesField = rawServices || req.body['services[]'];
+    const finalRawServices = servicesField ? ensureArray(parseJSONField(servicesField)) : null;
+
+    const amenitiesField = rawAmenities || req.body['amenities[]'];
+    const finalRawAmenities = amenitiesField ? ensureArray(parseJSONField(amenitiesField)) : null;
+
+    let parsedVenueImages = null;
+    if (venueImages) {
+        const parsed = parseJSONField(venueImages);
+        if (parsed) {
+            parsedVenueImages = ensureArray(parsed).filter(img => typeof img === 'string' && img.startsWith('http'));
+        }
+    }
+
+    let finalTradingLicense = tradingLicense;
+    let finalGmProfileImage = gmProfileImage;
+    let uploadedImages = [];
+
+    if (req.files && req.files.length > 0) {
+        const tradingLicenseFile = req.files.find(f => f.fieldname === 'tradingLicense');
+        if (tradingLicenseFile) {
+            if (!tradingLicenseFile.mimetype.startsWith('image/') && tradingLicenseFile.mimetype !== 'application/pdf') {
+                return sendError(res, 400, 'Trading license must be a PDF or an image.');
+            }
+            finalTradingLicense = getFileUrl(req, tradingLicenseFile.filename);
+        }
+
+        const gmProfileImageFile = req.files.find(f => f.fieldname === 'gmProfileImage');
+        if (gmProfileImageFile) {
+            finalGmProfileImage = getFileUrl(req, gmProfileImageFile.filename);
+        }
+
+        uploadedImages = req.files
+            .filter(f => f.fieldname === 'venueImages' || f.fieldname === 'venueImages[]')
+            .map(f => getFileUrl(req, f.filename));
+    } else if (req.file) {
+        if (req.file.fieldname === 'tradingLicense') {
+            if (!req.file.mimetype.startsWith('image/') && req.file.mimetype !== 'application/pdf') {
+                return sendError(res, 400, 'Trading license must be a PDF or an image.');
+            }
+            finalTradingLicense = getFileUrl(req, req.file.filename);
+        } else if (req.file.fieldname === 'gmProfileImage') {
+            finalGmProfileImage = getFileUrl(req, req.file.filename);
+        } else if (req.file.fieldname === 'venueImages' || req.file.fieldname === 'venueImages[]') {
+            uploadedImages = [getFileUrl(req, req.file.filename)];
+        }
+    }
+
+    if (parsedVenueImages || uploadedImages.length > 0) {
+        let finalVenueImages = parsedVenueImages || [];
+        if (uploadedImages.length > 0) {
+            finalVenueImages = [...finalVenueImages, ...uploadedImages];
+        }
+        if (finalVenueImages.length > 15) {
+            return sendError(res, 400, 'Maximum 15 venue images allowed');
+        }
+        venue.venueImages = finalVenueImages;
     }
 
     let resolvedServices;
-    if (rawServices) {
+    if (finalRawServices) {
         resolvedServices = [];
-        for (const item of rawServices) {
+        for (const item of finalRawServices) {
             if (mongoose.Types.ObjectId.isValid(item)) {
                 resolvedServices.push(item);
             } else {
@@ -295,9 +413,9 @@ exports.updateVenue = asyncWrapper(async (req, res) => {
     }
 
     let resolvedAmenities;
-    if (rawAmenities) {
+    if (finalRawAmenities) {
         resolvedAmenities = [];
-        for (const item of rawAmenities) {
+        for (const item of finalRawAmenities) {
             if (mongoose.Types.ObjectId.isValid(item)) {
                 resolvedAmenities.push(item);
             } else {
@@ -312,26 +430,65 @@ exports.updateVenue = asyncWrapper(async (req, res) => {
     if (aboutVenue !== undefined) venue.aboutVenue = aboutVenue;
     if (venueEmail) venue.email = venueEmail;
     if (venuePhoneNumber) venue.phoneNumber = venuePhoneNumber;
-    if (address) venue.address = address;
-    if (location) venue.location = location;
-    if (businessDays) venue.businessDays = businessDays;
-    if (venueImages) venue.venueImages = venueImages;
-    if (tradingLicense !== undefined) venue.tradingLicense = tradingLicense;
+    if (address) venue.address = parsedAddress;
+    
+    if (location) {
+        let finalLng = venue.location?.coordinates?.[0] || 0;
+        let finalLat = venue.location?.coordinates?.[1] || 0;
+        if (parsedLocation) {
+            if (Array.isArray(parsedLocation.coordinates) && parsedLocation.coordinates.length >= 2) {
+                finalLng = parseFloat(parsedLocation.coordinates[0]) || finalLng;
+                finalLat = parseFloat(parsedLocation.coordinates[1]) || finalLat;
+            } else {
+                finalLng = parseFloat(parsedLocation.lng) || parseFloat(parsedLocation.longitude) || finalLng;
+                finalLat = parseFloat(parsedLocation.lat) || parseFloat(parsedLocation.latitude) || finalLat;
+            }
+        }
+        if (finalLat < -90 || finalLat > 90) {
+            return sendError(res, 400, 'Latitude must be between -90 and 90');
+        }
+        if (finalLng < -180 || finalLng > 180) {
+            return sendError(res, 400, 'Longitude must be between -180 and 180');
+        }
+        venue.location = {
+            type: 'Point',
+            coordinates: [finalLng, finalLat],
+        };
+    }
+
+    if (parsedBusinessDays) venue.businessDays = parsedBusinessDays;
+    if (finalTradingLicense !== undefined) venue.tradingLicense = finalTradingLicense;
     if (websiteUrl !== undefined) venue.websiteUrl = websiteUrl;
 
-    if (req.files && req.files.length > 0) {
-        const tradingLicenseFile = req.files.find(f => f.fieldname === 'tradingLicense');
-        if (tradingLicenseFile) {
-            if (!tradingLicenseFile.mimetype.startsWith('image/') && tradingLicenseFile.mimetype !== 'application/pdf') {
-                return sendError(res, 400, 'Trading license must be a PDF or an image.');
-            }
-            venue.tradingLicense = getFileUrl(req, tradingLicenseFile.filename);
+    // Handle General Manager
+    if (gmPhoneNumber || gmEmail) {
+        let query = [];
+        if (gmPhoneNumber) query.push({ phoneNumber: gmPhoneNumber });
+        if (gmEmail) query.push({ email: gmEmail.toLowerCase() });
+
+        let gmUser = await User.findOne({ $or: query });
+
+        if (!gmUser) {
+            gmUser = await User.create({
+                fullName: gmName || 'General Manager',
+                email: gmEmail ? gmEmail.toLowerCase() : undefined,
+                phoneNumber: gmPhoneNumber,
+                profileImage: finalGmProfileImage || null,
+                role: 'general_manager',
+                isActive: true,
+                isVerified: true
+            });
+        } else {
+            gmUser.role = 'general_manager';
+            if (gmName) gmUser.fullName = gmName;
+            if (gmEmail) gmUser.email = gmEmail.toLowerCase();
+            if (gmPhoneNumber) gmUser.phoneNumber = gmPhoneNumber;
+            if (finalGmProfileImage) gmUser.profileImage = finalGmProfileImage;
+            await gmUser.save();
         }
-    } else if (req.file && req.file.fieldname === 'tradingLicense') {
-        if (!req.file.mimetype.startsWith('image/') && req.file.mimetype !== 'application/pdf') {
-            return sendError(res, 400, 'Trading license must be a PDF or an image.');
-        }
-        venue.tradingLicense = getFileUrl(req, req.file.filename);
+
+        venue.generalManager = gmUser._id;
+        await User.findByIdAndUpdate(gmUser._id, { managedVenue: venue._id });
     }
 
     await venue.save();
@@ -341,11 +498,32 @@ exports.updateVenue = asyncWrapper(async (req, res) => {
 
 
 exports.getAllVenues = asyncWrapper(async (req, res) => {
-    const venues = await VenueProfile.find({ isDeleted: false })
+    const { search } = req.query;
+    let query = { isDeleted: false };
+
+    if (search) {
+        const searchRegex = new RegExp(search.trim(), 'i');
+        // Find users matching search term to search by owner's name/email
+        const matchingUsers = await User.find({
+            $or: [
+                { fullName: searchRegex },
+                { email: searchRegex }
+            ]
+        }).select('_id');
+        const userIds = matchingUsers.map(u => u._id);
+
+        query.$or = [
+            { companyName: searchRegex },
+            { email: searchRegex },
+            { owner: { $in: userIds } }
+        ];
+    }
+
+    const venues = await VenueProfile.find(query)
         .populate('owner', 'fullName email phoneNumber role')
         .populate('services', 'name')
         .populate('amenities', 'name')
-        .populate('generalManager', 'fullName email phoneNumber role')
+        .populate('generalManager', 'fullName email phoneNumber role');
 
     return sendSuccess(res, 200, 'Venues fetched successfully', venues);
 });
@@ -540,7 +718,10 @@ exports.createTrainer = asyncWrapper(async (req, res) => {
 });
 
 exports.updateTrainer = asyncWrapper(async (req, res) => {
-    const profile = await TrainerProfile.findById(req.params.id).populate('user');
+    let profile = await TrainerProfile.findById(req.params.id).populate('user');
+    if (!profile) {
+        profile = await TrainerProfile.findOne({ user: req.params.id }).populate('user');
+    }
     if (!profile) return sendError(res, 404, 'Trainer profile not found');
 
     const trainerUser = profile.user;
@@ -716,35 +897,81 @@ exports.updateTrainer = asyncWrapper(async (req, res) => {
 });
 
 exports.getAllTrainers = asyncWrapper(async (req, res) => {
-    const { status } = req.query; // optional filter: 'pending', 'approved', 'rejected'
+    const { status, search, categoryIds } = req.query;
+    const page = parseInt(req.query.page, 10) || 0;
+    const limit = parseInt(req.query.limit, 10) || 10;
 
-    // Fetch users with role trainer
-    const users = await User.find({ isDeleted: false, role: 'trainer' }).lean();
-
-    // Fetch their profiles
-    const profiles = await TrainerProfile.find({ user: { $in: users.map(u => u._id) } }).lean();
-
-    let trainers = users.map(user => {
-        const profile = profiles.find(p => p.user.toString() === user._id.toString());
-        return {
-            ...user,
-            profile: profile || null,
-            approvalStatus: profile ? profile.approvalStatus : 'pending' // default if no profile
-        };
-    });
-
-    if (status) {
-        trainers = trainers.filter(t => t.approvalStatus === status);
+    // Build the user query
+    let userQuery = { isDeleted: false, role: 'trainer' };
+    if (search) {
+        const searchRegex = new RegExp(search.trim(), 'i');
+        userQuery.$or = [
+            { fullName: searchRegex },
+            { email: searchRegex },
+            { phoneNumber: searchRegex }
+        ];
     }
 
-    return sendSuccess(res, 200, 'Trainers fetched successfully', { trainers, totalCount: trainers.length });
+    // Fetch matching users
+    const users = await User.find(userQuery).lean();
+    const userIds = users.map(u => u._id);
+
+    // Build the profile query
+    let profileQuery = { user: { $in: userIds } };
+    if (categoryIds) {
+        if (mongoose.Types.ObjectId.isValid(categoryIds)) {
+            profileQuery.categories = new mongoose.Types.ObjectId(categoryIds);
+        } else {
+            profileQuery.categories = categoryIds;
+        }
+    }
+
+    // Fetch profiles
+    const profiles = await TrainerProfile.find(profileQuery).lean();
+
+    // Map profiles back to users and construct trainer list
+    let trainers = [];
+    for (const user of users) {
+        const profile = profiles.find(p => p.user.toString() === user._id.toString());
+        
+        // If a category filter is applied, we must have a matching profile
+        if (categoryIds && !profile) {
+            continue;
+        }
+
+        const trainerData = {
+            ...user,
+            profile: profile || null,
+            approvalStatus: profile ? profile.approvalStatus : 'pending'
+        };
+
+        // Filter by status if provided
+        if (status && trainerData.approvalStatus !== status) {
+            continue;
+        }
+
+        trainers.push(trainerData);
+    }
+
+    const totalCount = trainers.length;
+    const paginatedTrainers = trainers.slice(page * limit, (page + 1) * limit);
+
+    return sendSuccess(res, 200, 'Trainers fetched successfully', { trainers: paginatedTrainers, totalCount });
 });
 exports.getTrainerById = asyncWrapper(async (req, res) => {
-    const profile = await TrainerProfile.findById(req.params.id)
+    let profile = await TrainerProfile.findById(req.params.id)
         .populate('user', 'fullName email phoneNumber profileImage role')
         .populate('categories')
         .populate('serviceTypes')
         .populate('venues');
+        
+    if (!profile) {
+        profile = await TrainerProfile.findOne({ user: req.params.id })
+            .populate('user', 'fullName email phoneNumber profileImage role')
+            .populate('categories')
+            .populate('serviceTypes')
+            .populate('venues');
+    }
         
     if (!profile) {
         return sendError(res, 404, 'Trainer profile not found.');
@@ -762,7 +989,10 @@ exports.approveRejectTrainer = asyncWrapper(async (req, res) => {
         return sendError(res, 400, 'Invalid status. Must be "approved" or "rejected".');
     }
 
-    const trainer = await TrainerProfile.findById(req.params.id).populate('user');
+    let trainer = await TrainerProfile.findById(req.params.id).populate('user');
+    if (!trainer) {
+        trainer = await TrainerProfile.findOne({ user: req.params.id }).populate('user');
+    }
     if (!trainer) return sendError(res, 404, 'Trainer profile not found');
     if (!trainer.user) return sendError(res, 404, 'Associated user not found');
 
@@ -961,4 +1191,40 @@ exports.deleteServiceType = asyncWrapper(async (req, res) => {
     serviceType.isDeleted = true;
     await serviceType.save();
     return sendSuccess(res, 200, 'ServiceType soft deleted successfully', serviceType);
+});
+
+exports.approveRejectDocument = asyncWrapper(async (req, res) => {
+    const { id, status, remark, comment } = req.body;
+    if (!id) {
+        return sendError(res, 400, 'Document ID is required.');
+    }
+    if (status === undefined || status === null) {
+        return sendError(res, 400, 'Status is required.');
+    }
+
+    // Find the profile containing this certification ID
+    const profile = await TrainerProfile.findOne({ "certifications._id": id });
+    if (!profile) {
+        return sendError(res, 404, 'Trainer profile with the specified document not found.');
+    }
+
+    // Find the specific certification
+    const doc = profile.certifications.id(id);
+    if (!doc) {
+        return sendError(res, 404, 'Document not found inside trainer profile.');
+    }
+
+    // Update document properties
+    doc.status = status;
+    if (status === false) {
+        doc.remark = remark || null;
+        doc.comment = comment || null;
+    } else {
+        doc.remark = null;
+        doc.comment = null;
+    }
+
+    await profile.save();
+
+    return sendSuccess(res, 200, 'Document status updated successfully', doc);
 });

@@ -106,7 +106,8 @@ const createVenue = asyncWrapper(async (req, res) => {
     about,          // flutter fallback
     tradingLicense,
     websiteUrl,
-    gmName, gmEmail, gmPhoneNumber, gmProfileImage
+    gmName, gmEmail, gmPhoneNumber, gmProfileImage,
+    businessDays
   } = req.body;
 
   if (!companyName) {
@@ -148,6 +149,11 @@ const createVenue = asyncWrapper(async (req, res) => {
     tradingLicense,
     websiteUrl,
   };
+
+  const parsedBusinessDays = ensureArray(parseJSONField(businessDays));
+  if (parsedBusinessDays && parsedBusinessDays.length > 0) {
+    venueData.businessDays = parsedBusinessDays;
+  }
 
   // Handle flexible file uploads (uploadAny populates req.files array)
   if (req.files && req.files.length > 0) {
@@ -449,6 +455,10 @@ const updateVenue = asyncWrapper(async (req, res) => {
       type: 'Point',
       coordinates: [finalLng, finalLat],
     };
+
+    if (req.body.businessDays !== undefined) {
+      venue.businessDays = ensureArray(parseJSONField(req.body.businessDays)) || [];
+    }
 
     // Update Logo
     if (req.files && req.files.length > 0) {

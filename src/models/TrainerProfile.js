@@ -4,6 +4,9 @@ const certificationSchema = new mongoose.Schema({
   name: { type: String, required: true },
   fileUrl: { type: String },
   uploadedAt: { type: Date, default: Date.now },
+  status: { type: Boolean, default: null },
+  remark: { type: String, default: null },
+  comment: { type: String, default: null },
 });
 
 const serviceAreaSchema = new mongoose.Schema({

@@ -78,26 +78,31 @@ const sendOTP = asyncWrapper(async (req, res) => {
 const verifyOTP = asyncWrapper(async (req, res) => {
   const { phoneNumber, otp } = req.body;
 
-  // Find the most recent unused OTP for this phone
-  const otpRecord = await OTP.findOne({
-    phoneNumber,
-    isUsed: false,
-    expiresAt: { $gt: new Date() },
-  }).sort({ createdAt: -1 });
+  // Special condition for test phone number and OTP bypass
+  const isTestAccount = (String(phoneNumber) === '999999999' || String(phoneNumber) === '9999999999') && String(otp) === '123456';
 
-  if (!otpRecord) {
-    return sendError(res, 400, 'OTP has expired or does not exist. Please request a new OTP.');
+  if (!isTestAccount) {
+    // Find the most recent unused OTP for this phone
+    const otpRecord = await OTP.findOne({
+      phoneNumber,
+      isUsed: false,
+      expiresAt: { $gt: new Date() },
+    }).sort({ createdAt: -1 });
+
+    if (!otpRecord) {
+      return sendError(res, 400, 'OTP has expired or does not exist. Please request a new OTP.');
+    }
+
+    // Compare OTP
+    const isMatch = await bcrypt.compare(otp, otpRecord.otp);
+    if (!isMatch) {
+      return sendError(res, 400, 'Invalid OTP. Please try again.');
+    }
+
+    // Mark OTP as used
+    otpRecord.isUsed = true;
+    await otpRecord.save();
   }
-
-  // Compare OTP
-  const isMatch = await bcrypt.compare(otp, otpRecord.otp);
-  if (!isMatch) {
-    return sendError(res, 400, 'Invalid OTP. Please try again.');
-  }
-
-  // Mark OTP as used
-  otpRecord.isUsed = true;
-  await otpRecord.save();
 
   // Find or create user
   let user = await User.findOne({ phoneNumber });

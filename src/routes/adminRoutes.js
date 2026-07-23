@@ -32,6 +32,7 @@ router.put('/trainers/:id', uploadAny(), adminController.updateTrainer);
 router.get('/trainers', adminController.getAllTrainers);
 router.get('/trainers/:id', adminController.getTrainerById);
 router.patch('/trainers/:id/approval', adminController.approveRejectTrainer);
+router.post('/documentApproveRejectByAdmin', adminController.approveRejectDocument);
 router.patch('/trainers/:id/status', adminController.toggleTrainerStatus);
 router.delete('/trainers/:id', adminController.deleteTrainer);
 
