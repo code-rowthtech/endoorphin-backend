@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const TrainerProfile = require('../models/TrainerProfile');
 const OTP = require('../models/OTP');
 const generateOTP = require('../utils/generateOTP');
 const generateToken = require('../utils/generateToken');
@@ -25,8 +26,9 @@ const sendOTP = asyncWrapper(async (req, res) => {
     // Invalidate any existing active OTPs for this number
     await OTP.deleteMany({ phoneNumber });
 
-    // Generate OTP
-    const otpCode = generateOTP();
+    // Generate OTP (Use static OTP 123456 for test number 9999999999)
+    const isTestNumber = phoneNumber === '9999999999';
+    const otpCode = isTestNumber ? '123456' : generateOTP();
     const expiryMinutes = parseInt(process.env.OTP_EXPIRY_MINUTES, 10) || 5;
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
@@ -40,13 +42,15 @@ const sendOTP = asyncWrapper(async (req, res) => {
       expiresAt,
     });
 
-    // Send OTP via Twilio SMS
-    const fullPhoneNumber = phoneNumber.startsWith('+') ? phoneNumber : `${countryCode}${phoneNumber}`;
-    try {
-      await sendOtp(fullPhoneNumber, otpCode);
-    } catch (twilioError) {
-      console.error('Twilio SMS delivery failed:', twilioError.message);
-      // OTP is still stored; we let dev-mode response expose the code below
+    // Send OTP via Twilio SMS (skip SMS for test number)
+    if (!isTestNumber) {
+      const fullPhoneNumber = phoneNumber.startsWith('+') ? phoneNumber : `${countryCode}${phoneNumber}`;
+      try {
+        await sendOtp(fullPhoneNumber, otpCode);
+      } catch (twilioError) {
+        console.error('Twilio SMS delivery failed:', twilioError.message);
+        // OTP is still stored; we let dev-mode response expose the code below
+      }
     }
 
     const responseData = {
@@ -107,6 +111,18 @@ const verifyOTP = asyncWrapper(async (req, res) => {
   } else {
     user.isVerified = true;
     await user.save();
+    
+    if (user.role === 'trainer') {
+      const trainerProfile = await TrainerProfile.findOne({ user: user._id });
+      if (trainerProfile) {
+        if (trainerProfile.approvalStatus === 'pending') {
+          return sendError(res, 403, 'Your trainer profile is currently pending admin approval.');
+        }
+        if (trainerProfile.approvalStatus === 'rejected') {
+          return sendError(res, 403, `Your trainer profile has been rejected. Reason: ${trainerProfile.rejectionReason || 'Please contact support.'}`);
+        }
+      }
+    }
   }
 
   const token = generateToken(user._id);

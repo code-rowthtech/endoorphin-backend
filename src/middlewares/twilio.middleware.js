@@ -37,6 +37,35 @@ const sendOtp = async (toPhoneNumber, otp) => {
   }
 };
 
+const sendSMS = async (toPhoneNumber, bodyText) => {
+  try {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const twilioPhoneNumber = process.env.TWILIO_PHONE_NUMBER;
+
+    if (!accountSid || !authToken || !twilioPhoneNumber) {
+      console.warn('Twilio credentials not configured. SMS not sent.');
+      return { success: false };
+    }
+
+    const client = twilio(accountSid, authToken);
+    const message = await client.messages.create({
+      body: bodyText,
+      from: twilioPhoneNumber,
+      to: toPhoneNumber,
+    });
+
+    return {
+      success: true,
+      messageId: message.sid,
+    };
+  } catch (error) {
+    console.error('Error sending SMS via Twilio:', error);
+    return { success: false };
+  }
+};
+
 module.exports = {
   sendOtp,
+  sendSMS,
 };

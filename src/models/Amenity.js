@@ -19,6 +19,14 @@ const amenitySchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-});
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false,
+  },
+}, { timestamps: true });
 
 module.exports = mongoose.model('Amenity', amenitySchema);
